@@ -229,7 +229,7 @@ The agent retried once with a different query, then answered the half it could, 
 
 ## Known weaknesses to track
 
-1. **Competitor figures depend on what Tavily returns.** Primary sources (IR releases, 10-Q) were not found for Microsoft's latest quarter. Options: steer queries toward `microsoft.com/investor` or `sec.gov`, or use Tavily's `include_domains` for a second, primary-sources-only search.
+1. **Competitor figures depend on what Tavily returns.** Primary sources (IR releases, 10-Q) were not found for Microsoft's latest quarter. Addressed in #29 by a model-driven evidence check rather than a domain allow-list (ADR-0006); see the #29 section below for what it changed.
 2. **Period alignment in comparisons.** "Current" for Microsoft and "latest 10-K" for Apple are different periods. The agent flags it but doesn't align them (for example, by comparing Apple's latest quarter).
 3. **No token or cost figures** were captured for these runs.
 4. **Run-to-run variation.** Query 2 picked different Microsoft periods (FY2026 vs fiscal Q4 2026) and sources between runs. Only repeated runs, as in the planned evaluation suite, can measure this.
@@ -244,3 +244,32 @@ The agent retried once with a different query, then answered the half it could, 
 | Run 2 | ✅ passed, 14 s: identical trace and figures | ✅ passed, 27 s: Items 8, 7 and 1A searched, five web searches, Apple 46.9% |
 
 **Microsoft's company-wide gross margin was not found in either run** (weakness 1 above). Both answers gave Microsoft's fiscal Q1 2027 revenue and operating income, said that the only gross margin figure found was Microsoft Cloud's segment margin (about 66%), and declined to use it as the company-wide figure. That is the behaviour the #9 prompt fix asks for, but it means the comparison itself went unanswered. The live test does not assert a Microsoft figure, because web data drifts.
+
+## 2026-11-03: evidence check (#29)
+
+The agent now checks its draft answer's evidence with one structured-output call and, when the check reports gaps, sends the executor back once with model-written retry guidance (ADR-0006). No domain or company list is coded. Same model, Filing and Tavily settings as above. Runs: `RUN_LIVE_TESTS=true pytest tests/test_queries.py -m live -s`. The `-s` log now prints each check and its guidance.
+
+| Run | Query | Result | Evidence check | Microsoft figure and its source |
+|---|---|---|---|---|
+| 1 (first version of the check prompt) | 2 | ❌ one failed check: `hit_round_limit` | 3 gaps after round 5: company-wide margin `missing`, `secondary_source`, `period_mismatch` → retry. The retry also chased Apple's latest quarter, then ran into the 8-round limit | 67.2%, fiscal Q4 2026, company-wide, from a Yahoo Finance article (secondary, date unknown). Microsoft Cloud 66% labelled as a segment |
+| 2 | 2 | ✅ passed | 1 gap after round 5: company-wide margin for fiscal Q1 2027 `missing` → retry: 5 more searches for the release / 10-Q income statement | **None found.** The answer gives revenue $92.28B and operating income $45.92B (Yahoo Finance), labels Cloud 66% as a segment figure, and names the gap: total cost of revenue or gross profit for the quarter |
+| 3 | 2 | ✅ passed | 1 gap after round 3: company-wide margin `secondary_source` → retry: 5 searches for Microsoft's own release / 10-Q, plus a `calculate` cross-check | **67.8%, fiscal Q1 2027, computed with `calculate`** as (92.3 − 29.7) / 92.3 from revenue (search-result page) and cost of revenue (investing.com summary of Microsoft's slides). Cross-checked as (operating income 45.9 + operating expenses 16.6) / 92.3 = 67.7%. Labelled secondary |
+| 3 | 1 | ✅ passed | `evidence sufficient`, no retry | — (R&D 8.30%, same trace as before: 6 calls in 2 rounds) |
+
+**How often the figure came from Microsoft's own release: 0 of 3.** In every run the check flagged the Microsoft figure and the retry searched explicitly for the earnings release, the 10-Q and the income-statement line items, as the check's guidance said. Tavily (topic `finance`, 5 results, snippets only) returned news and aggregator pages each time. The check moved run 3 from a quoted aggregator percentage to a company-wide margin computed from its components. It made run 2 name the missing input precisely. It never produced a segment figure presented as company-wide.
+
+After run 1 the check prompt was narrowed: one gap per fact, at most three; Filing facts are not to be replaced with newer figures; a cross-period comparison the question sets up is not a gap when both periods are stated. The retry turn also now states the tool rounds left. Runs 2 and 3 finished within the round limit.
+
+Example (run 3):
+
+```
+EVIDENCE CHECKS:
+1 gap: Microsoft company-wide gross margin, latest quarter (Q1 FY2027, quarter ended Sept 30, 2026) — secondary_source → retrying
+  next: Microsoft reports revenue and cost of revenue itself, but the $29.7B cost of revenue and 68% gross margin come only
+  from an investing.com summary of the slides, and the pages show no date. Use web_search to find Microsoft's own FY27 Q1
+  press release or 10-Q … Take total revenue and total cost of revenue … and recompute with calculate.
+```
+
+The guidance names the investor site and SEC filings because the model wrote it from the evidence. Neither the code nor the prompts contain them.
+
+**Remaining gap.** The search tool returns snippets, not the release's tables, so even a well-aimed retry rarely sees Microsoft's own income statement. A page-fetch tool is the next step (README → Future work).

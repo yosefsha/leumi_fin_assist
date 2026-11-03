@@ -35,3 +35,6 @@ The Index Entry for a table: its caption, column headers and row labels, with no
 
 **Citation**:
 The Section Path and page of a Passage, or the URL and date of a web result.
+
+**Evidence check**:
+A model call that judges whether the tool results gathered so far support the draft answer, and lists the gaps with guidance for another search. It sends the agent back at most once per question.
