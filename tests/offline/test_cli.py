@@ -30,18 +30,19 @@ from cli.cli_options import CliOptions, parse_cli_args
 from cli.question_session import CANCELLED_LINE, PROCESSING_LINE
 from cli.repl import PROMPT
 from cli.tool_call_format import describe_outcome
-from cli.trace_printer import TracePrinter
+from cli.trace_printer import TracePrinter, describe_check
 from fakes.scripted_chat_model import Outcome, ScriptedChatModel, text_reply, tool_reply
 from main import main
 from tools.calculator import CalculateTool
 from tools.registry import ToolOutput, ToolRegistry
 from utils.agent_observer import AgentObserver
-from utils.agent_result import AgentResult, ToolCallRecord
+from utils.agent_result import AgentResult, EvidenceCheck, ToolCallRecord
 from utils.chat_model import ChatModelError
 from utils.citation_format import CitationFormatter
 from utils.cited_answer import CitationResolver, CitedAnswer
 from utils.config import Settings
 from utils.embedder import EmbedderError
+from utils.evidence_review import EvidenceReview
 from utils.logging_config import LibraryNoiseFilter, configure_logging
 from utils.passage import Passage, PassageKind
 from utils.plan import Plan
@@ -93,7 +94,7 @@ class _StubAgent:
 
 
 def _scripted_builder(
-    replies: Iterable[Outcome], plan_json: str = _PLAN_JSON
+    replies: Iterable[Outcome], plan_json: str = _PLAN_JSON, reviews: Iterable[str] | None = None
 ) -> Callable[[AgentObserver | None], ResearchAgent]:
     """Build the real agent over a scripted model, with the observer the CLI hands it."""
 
@@ -103,7 +104,7 @@ def _scripted_builder(
         registry.register(CalculateTool())
         formatter = CitationFormatter(fiscal_year=2025)
         return ResearchAgent(
-            model=ScriptedChatModel(replies, plan_json=plan_json),
+            model=ScriptedChatModel(replies, plan_json=plan_json, reviews=reviews),
             tools=registry,
             citer=ToolResultCiter(formatter),
             resolver=CitationResolver(formatter),
@@ -213,6 +214,7 @@ def test_a_question_prints_progress_plan_trace_answer_and_sources_in_order() -> 
         "       2) calculate — R&D as a share of net sales.\n"
         '[Tool: search_filing(item="8") "research and development expense"]\n'
         "[Tool: calculate] 34550 / 416161 * 100 = 8.302075398703867\n"
+        "[Check] evidence sufficient\n"
         "\n"
         f"{expected_answer.text}\n"
         "\n"  # spacing before the next prompt
@@ -268,6 +270,54 @@ def test_query_without_quiet_shows_the_trace_but_no_banner() -> None:
     assert status == EXIT_OK
     assert out.startswith(f"{PROCESSING_LINE}\n[Plan] none — working from the question alone\n")
     assert BANNER not in out
+
+
+_GAP_REVIEW = (
+    '{"gaps": [{"requirement": "Company-wide gross margin, latest quarter",'
+    ' "problem": "segment_not_company_wide", "retry_guidance": "Search the earnings release."}],'
+    ' "sufficient": false}'
+)
+
+
+@pytest.mark.parametrize(("quiet", "shown"), [(False, True), (True, False)], ids=["trace", "quiet"])
+def test_check_lines_show_a_retry_and_quiet_hides_them(quiet: bool, shown: bool) -> None:
+    build = _scripted_builder(
+        [text_reply("Segment only."), tool_reply(_SEARCH), text_reply(_ANSWER)],
+        reviews=[_GAP_REVIEW],
+    )
+    status, out, err = _run(CliOptions(quiet=quiet, query="q"), build)
+    check_line = (
+        "[Check] 1 gap: Company-wide gross margin, latest quarter — "
+        "segment_not_company_wide → retrying\n"
+    )
+    assert (status, err) == (EXIT_OK, "")
+    assert (check_line in out) is shown
+    assert ("[Check]" in out) is shown
+    assert out.endswith(f"R&D was 8.3% of net sales [1].\n\nSources:\n[1] {_SOURCE_LINE}\n")
+
+
+def _review(json_text: str) -> EvidenceCheck:
+    return EvidenceCheck(review=EvidenceReview.model_validate_json(json_text))
+
+
+@pytest.mark.parametrize(
+    ("check", "line"),
+    [
+        (_review('{"gaps": [], "sufficient": true}'), "evidence sufficient"),
+        (EvidenceCheck(review=None), "unavailable — keeping the draft answer"),
+        (
+            _review(
+                '{"gaps": [{"requirement": "A", "problem": "missing", "retry_guidance": "x"},'
+                ' {"requirement": "B", "problem": "secondary_source", "retry_guidance": "y"}],'
+                ' "sufficient": false}'
+            ),
+            "2 gaps: A — missing; B — secondary_source → retrying",
+        ),
+    ],
+    ids=["sufficient", "failed", "two-gaps"],
+)
+def test_check_lines(check: EvidenceCheck, line: str) -> None:
+    assert describe_check(check) == line
 
 
 def test_query_exits_non_zero_on_an_api_failure() -> None:

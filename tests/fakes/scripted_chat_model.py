@@ -38,25 +38,44 @@ class RespondCall:
 type Outcome = ModelReply | ChatModelError
 
 
-class ScriptedChatModel:
-    """Answers `generate_json` with `plan_json` and each `respond` with the next outcome.
+SUFFICIENT_REVIEW = '{"gaps": [], "sufficient": true}'
 
-    Running out of scripted replies is a test bug, so it raises `AssertionError`.
+type JsonOutcome = str | ChatModelError
+
+
+class ScriptedChatModel:
+    """Scripted `ChatModel`: plans, evidence reviews and executor turns.
+
+    `generate_json` answers a planner request (a schema with `steps`) with
+    `plan_json`, and an evidence-check request with the next of `reviews`; when
+    `reviews` is not given, every check finds the evidence sufficient. Each
+    `respond` returns the next outcome. Running out of scripted replies or
+    reviews is a test bug, so it raises `AssertionError`.
     """
 
     def __init__(
-        self, replies: Iterable[Outcome], plan_json: str | ChatModelError = '{"steps": []}'
+        self,
+        replies: Iterable[Outcome],
+        plan_json: JsonOutcome = '{"steps": []}',
+        reviews: Iterable[JsonOutcome] | None = None,
     ) -> None:
         self._replies = list(replies)
         self._plan_json = plan_json
+        self._reviews = None if reviews is None else list(reviews)
         self.json_requests: list[tuple[str, str, Mapping[str, Any]]] = []
+        self.review_requests: list[tuple[str, str, Mapping[str, Any]]] = []
         self.respond_calls: list[RespondCall] = []
 
     def generate_json(self, system: str, prompt: str, schema: Mapping[str, Any]) -> str:
-        self.json_requests.append((system, prompt, schema))
-        if isinstance(self._plan_json, ChatModelError):
-            raise self._plan_json
-        return self._plan_json
+        if "steps" in schema.get("properties", {}):
+            self.json_requests.append((system, prompt, schema))
+            return _outcome(self._plan_json)
+        self.review_requests.append((system, prompt, schema))
+        if self._reviews is None:
+            return SUFFICIENT_REVIEW
+        if not self._reviews:
+            raise AssertionError("Unexpected extra evidence check.")
+        return _outcome(self._reviews.pop(0))
 
     def respond(
         self,
@@ -79,3 +98,9 @@ class ScriptedChatModel:
         if isinstance(outcome, ChatModelError):
             raise outcome
         return outcome
+
+
+def _outcome(outcome: JsonOutcome) -> str:
+    if isinstance(outcome, ChatModelError):
+        raise outcome
+    return outcome

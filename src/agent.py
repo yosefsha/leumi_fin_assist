@@ -1,4 +1,4 @@
-"""The research agent: a planning call, then a native tool-use execution loop (issue #9)."""
+"""The research agent: a planning call, a native tool-use loop and an evidence check (#9, #29)."""
 
 import logging
 from collections.abc import Callable, Sequence
@@ -9,13 +9,16 @@ from anthropic.types import MessageParam, TextBlockParam, ToolResultBlockParam, 
 
 from tools.registry import ToolOutput, ToolRegistry
 from utils.agent_observer import AgentObserver, SilentObserver
-from utils.agent_result import AgentResult, ToolCallRecord
+from utils.agent_result import AgentResult, EvidenceCheck, ToolCallRecord
 from utils.chat_model import ChatModel, ChatModelError, ModelReply
 from utils.citations import CitationRegistry
 from utils.cited_answer import CitationResolver
+from utils.evidence_review import Gap
+from utils.evidence_reviewer import EvidenceReviewer
 from utils.plan import Plan
 from utils.planner import Planner
 from utils.prompts import load_prompt, render_prompt
+from utils.tool_evidence import ToolEvidence
 from utils.tool_result_citer import ToolResultCiter
 
 logger = logging.getLogger(__name__)
@@ -23,6 +26,9 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_ROUNDS = 8
 SYSTEM_PROMPT = "system_prompt"
 ROUND_LIMIT_PROMPT = "round_limit"
+EVIDENCE_RETRY_PROMPT = "evidence_retry"
+# Draft answers the evidence check may send back for more tool use, per question.
+MAX_EVIDENCE_RETRIES = 1
 
 
 class ResearchAgent:
@@ -33,9 +39,15 @@ class ResearchAgent:
        `tool_use` block of a turn runs concurrently and all results go back in one
        message. Each result's sources get citation IDs from a registry created
        fresh for the question, before the model sees them.
-    3. After `MAX_TOOL_ROUNDS` rounds of tool calls, the model is told to answer
-       with what it has and name the gaps, and may call no more tools.
-    4. The final text's citation markers are checked against the registry; unknown
+    3. When the model answers without calling a tool, the `EvidenceReviewer`
+       checks that draft against the evidence. If it reports gaps, they go back to
+       the model with retry guidance and the tool loop continues; at most
+       `MAX_EVIDENCE_RETRIES` times per question, never once the round budget is
+       spent. A failed check keeps the draft: it never blocks an answer.
+    4. After `MAX_TOOL_ROUNDS` rounds of tool calls (retry rounds included), the
+       model is told to answer with what it has and name the gaps, and may call
+       no more tools.
+    5. The final text's citation markers are checked against the registry; unknown
        ones are dropped and the rest become a numbered Sources list.
 
     A tool failure is an `is_error` tool result for the model to work around. A
@@ -60,6 +72,7 @@ class ResearchAgent:
         self._resolver = resolver
         self._fiscal_year = fiscal_year
         self._planner = Planner(model, fiscal_year)
+        self._reviewer = EvidenceReviewer(model, fiscal_year)
         self._observer = observer or SilentObserver()
         self._today = today
 
@@ -80,6 +93,8 @@ class ResearchAgent:
         registry = CitationRegistry()
         messages: list[MessageParam] = [{"role": "user", "content": _task(question, plan)}]
         trace: list[ToolCallRecord] = []
+        evidence: list[ToolEvidence] = []
+        checks: list[EvidenceCheck] = []
 
         rounds = 0
         while True:
@@ -92,12 +107,32 @@ class ResearchAgent:
                 # A tool call cut off by the output limit has incomplete arguments.
                 raise ChatModelError("The model hit its output limit while calling a tool.")
             if not reply.tool_calls or not tools_allowed:
+                # A check that finds no gaps, or fails, ends the run, so every check
+                # so far sent the model back once: `len(checks)` counts the retries.
+                # A check that finds no gaps, or fails, ends the run, so every check
+                # so far sent the model back once: `len(checks)` counts the retries.
+                if tools_allowed and reply.text and len(checks) < MAX_EVIDENCE_RETRIES:
+                    check = self._reviewer.review(
+                        question,
+                        plan,
+                        evidence,
+                        reply.text,
+                        [tool["name"] for tool in definitions],
+                        today,
+                    )
+                    checks.append(check)
+                    self._observer.on_evidence_check(check)
+                    if check.review is not None and not check.review.sufficient:
+                        messages.append(
+                            {"role": "user", "content": _retry_request(check.review.gaps)}
+                        )
+                        continue
                 return self._finish(
-                    question, plan, trace, reply, registry, hit_limit=not tools_allowed
+                    question, plan, trace, reply, registry, tuple(checks), not tools_allowed
                 )
             rounds += 1
             content: list[ToolResultBlockParam | TextBlockParam] = list(
-                self._run_round(rounds, reply.tool_calls, registry, trace)
+                self._run_round(rounds, reply.tool_calls, registry, trace, evidence)
             )
             if rounds == MAX_TOOL_ROUNDS:
                 logger.warning("Tool round limit (%d) reached; asking for an answer.", rounds)
@@ -110,6 +145,7 @@ class ResearchAgent:
         calls: Sequence[ToolUseBlock],
         registry: CitationRegistry,
         trace: list[ToolCallRecord],
+        evidence: list[ToolEvidence],
     ) -> list[ToolResultBlockParam]:
         """Run `calls` concurrently; cite and record them in call order; return the results."""
         pool = ThreadPoolExecutor(max_workers=len(calls))
@@ -135,6 +171,7 @@ class ResearchAgent:
             if output.is_error:
                 logger.warning("Tool %s failed: %s", call.name, output.content)
             trace.append(record)
+            evidence.append(ToolEvidence(record=record, cited_content=cited.content))
             self._observer.on_tool_call(record)
             results.append(
                 {
@@ -165,6 +202,7 @@ class ResearchAgent:
         trace: list[ToolCallRecord],
         reply: ModelReply,
         registry: CitationRegistry,
+        checks: tuple[EvidenceCheck, ...],
         hit_limit: bool,
     ) -> AgentResult:
         if not reply.text:
@@ -178,6 +216,7 @@ class ResearchAgent:
             answer=self._resolver.resolve(reply.text, registry),
             hit_round_limit=hit_limit,
             answer_truncated=reply.truncated,
+            evidence_checks=checks,
         )
 
 
@@ -187,3 +226,12 @@ def _task(question: str, plan: Plan) -> str:
     if plan.steps:
         task += f"\n\n<plan>\n{plan.numbered()}\n</plan>"
     return task
+
+
+def _retry_request(gaps: tuple[Gap, ...]) -> str:
+    """The user turn that sends the evidence check's gaps and guidance back to the executor."""
+    listed = "\n".join(
+        f"{n}. {gap.requirement} ({gap.problem.value}). Next: {gap.retry_guidance}"
+        for n, gap in enumerate(gaps, 1)
+    )
+    return render_prompt(EVIDENCE_RETRY_PROMPT, {"gaps": listed}).strip()

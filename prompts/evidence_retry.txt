@@ -1,0 +1,5 @@
+An evidence check of your draft answer found these gaps:
+
+{{gaps}}
+
+Use the tools to close them, following the guidance where it helps; change the wording of a search rather than repeating it. Then write the complete final answer again: it replaces the draft, so include everything the question asks for, citing only IDs from the tool results. If a gap cannot be closed, answer with the evidence you have and state plainly what is missing.
