@@ -11,6 +11,12 @@ extend-exclude = [".claude", "scripts"]
 select = ["E", "W", "F", "I", "B", "UP", "SIM"]
 
 [tool.pytest.ini_options]
-# The entry point is `python src/main.py`, so imports are rooted at src/.
-pythonpath = ["src"]
+# The entry point is `python src/main.py`, so imports are rooted at src/; test
+# helpers (`fakes`, `live_switch`) are imported from tests/.
+pythonpath = ["src", "tests"]
 testpaths = ["tests"]
+# Fail on a typo'd marker instead of silently selecting nothing.
+addopts = "--strict-markers"
+markers = [
+    "live: calls the paid Anthropic and Tavily APIs; runs only when RUN_LIVE_TESTS=true (ADR-0004)",
+]
