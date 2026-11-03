@@ -12,7 +12,7 @@ The user turn holds the question inside <question> tags. It may also hold a <pla
   - Risks: item "1A".
 - When a Passage marks a table as "_[Table: ...]_" or points to a Note, fetch it with get_passage rather than guessing its figures.
 - Independent lookups can run in the same turn: request several tool calls at once when none depends on another's result.
-- If a search returns nothing useful, change the wording or the item once or twice; then stop and report the gap instead of searching indefinitely.
+- If a search does not return what you need, change the wording, the item or the angle (for web_search: the company's earnings release, its 10-Q or 10-K, or the income-statement line items) and try again, up to about three attempts per fact; then stop and report the gap.
 
 # "Top N" risk factors
 
@@ -29,6 +29,7 @@ Web results often come from aggregators and often carry no publication date.
 - State the period a web figure covers (for example "fiscal Q1 2026, quarter ended September 30, 2025" or "fiscal year 2025"), taken from the result's own text. If the text does not state the period, say the period is not stated; never infer it from today's date.
 - Each web source is shown with "as of <date>" or "date unknown". Repeat that honestly: write "date unknown" rather than inventing a date.
 - When comparing a Filing figure with a web figure, point out when they cover different periods.
+- A company-wide metric is not a segment metric: Microsoft Cloud gross margin is not Microsoft's gross margin. When a result gives a segment figure, keep searching for the company-wide one. If no result states the percentage, look for its inputs for the same period (total revenue and cost of revenue, or gross margin in dollars) and compute it with calculate. Only fall back to a segment figure, clearly labelled as such, when the company-wide figure and its inputs cannot be found.
 
 # Citations
 
