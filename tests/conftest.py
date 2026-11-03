@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from fakes.in_memory_index_store import InMemoryIndexStore
-from index_wiring import make_loader
 from live_switch import (
     SKIP_REASON,
     live_tests_enabled,
@@ -20,7 +19,7 @@ from live_switch import (
 from utils.config import DEFAULT_FILING_PATH, DEFAULT_INDEX_DIR, PROJECT_ROOT, load_environment
 from utils.fastembed_embedder import FastEmbedEmbedder
 from utils.filing_index import FilingIndex
-from utils.filing_index_factory import MODELS_SUBDIR
+from utils.filing_index_factory import MODELS_SUBDIR, build_filing_index_loader
 from utils.filing_parser import FilingParser
 from utils.passage import Passage
 
@@ -72,4 +71,4 @@ def filing_index(
     embedder: FastEmbedEmbedder, index_store: InMemoryIndexStore, filing_path: Path
 ) -> FilingIndex:
     """The Filing's hybrid index, built once per run with the real embedding model."""
-    return make_loader(embedder, embedder, index_store).load(filing_path)
+    return build_filing_index_loader(embedder, embedder, index_store).load(filing_path)

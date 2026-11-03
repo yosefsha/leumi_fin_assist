@@ -12,9 +12,9 @@ import pytest
 from fakes.constant_embedder import ConstantEmbedder
 from fakes.counting_embedder import CountingEmbedder
 from fakes.in_memory_index_store import InMemoryIndexStore
-from index_wiring import make_loader
 from utils.fastembed_embedder import FastEmbedEmbedder
 from utils.filing_index import FilingIndex, UnknownItemError
+from utils.filing_index_factory import build_filing_index_loader
 from utils.filing_index_loader import IndexEntryTooLongError
 from utils.passage import Passage
 
@@ -34,7 +34,7 @@ def test_build_covers_every_passage_within_the_model_limit(
 def test_an_entry_over_the_model_limit_fails_the_build(
     embedder: FastEmbedEmbedder, filing_path: Path
 ) -> None:
-    loader = make_loader(embedder, embedder, InMemoryIndexStore(), entry_budget=2000)
+    loader = build_filing_index_loader(embedder, embedder, InMemoryIndexStore(), entry_budget=2000)
     with pytest.raises(IndexEntryTooLongError) as raised:
         loader.load(filing_path)
     assert raised.value.tokens > raised.value.limit == 512
@@ -47,7 +47,7 @@ def test_a_second_start_reuses_the_stored_index(
     filing_path: Path,
 ) -> None:
     counting = CountingEmbedder(embedder)
-    reloaded = make_loader(counting, embedder, index_store).load(filing_path)
+    reloaded = build_filing_index_loader(counting, embedder, index_store).load(filing_path)
     assert counting.document_calls == 0
     assert reloaded.entry_count == filing_index.entry_count
 
@@ -56,7 +56,7 @@ def test_a_second_start_reuses_the_stored_index(
 def constant_store(embedder: FastEmbedEmbedder, filing_path: Path) -> InMemoryIndexStore:
     """A store already holding a current index of the Filing, built with `ConstantEmbedder`."""
     store = InMemoryIndexStore()
-    make_loader(ConstantEmbedder(), embedder, store).load(filing_path)
+    build_filing_index_loader(ConstantEmbedder(), embedder, store).load(filing_path)
     return store
 
 
@@ -70,10 +70,10 @@ def test_a_changed_filing_is_rebuilt(
     changed.write_bytes(filing_path.read_bytes() + b"\n<!-- amended -->\n")
     counting = CountingEmbedder(ConstantEmbedder())
 
-    make_loader(counting, embedder, constant_store).load(changed)
+    build_filing_index_loader(counting, embedder, constant_store).load(changed)
     assert counting.document_calls == 1
 
-    make_loader(counting, embedder, constant_store).load(changed)
+    build_filing_index_loader(counting, embedder, constant_store).load(changed)
     assert counting.document_calls == 1
 
 
@@ -81,7 +81,9 @@ def test_force_rebuild_rebuilds_a_current_index(
     constant_store: InMemoryIndexStore, embedder: FastEmbedEmbedder, filing_path: Path
 ) -> None:
     counting = CountingEmbedder(ConstantEmbedder())
-    make_loader(counting, embedder, constant_store).load(filing_path, force_rebuild=True)
+    build_filing_index_loader(counting, embedder, constant_store).load(
+        filing_path, force_rebuild=True
+    )
     assert counting.document_calls == 1
 
 

@@ -166,7 +166,6 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 ├── tests/
 │   ├── conftest.py                ✅ session fixtures (parsed Filing, built index) + the `RUN_LIVE_TESTS` gate
 │   ├── live_switch.py             ✅ `RUN_LIVE_TESTS` and API-key checks for `live` tests
-│   ├── index_wiring.py            ✅ wires a `FilingIndexLoader` with injectable ports
 │   ├── fakes/                     ✅ in-memory port fakes (index store, embedders, web search client)
 │   ├── offline/                   ✅ offline tier: parser, index, calculate, citations, web_search, live switch
 │   └── test_queries.py            #11 live end-to-end tests of the two queries (`@pytest.mark.live`)
