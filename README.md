@@ -714,19 +714,46 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
    Tavily (finance topic, 5 snippets) return Microsoft's own release or income statement, so
    the inputs stay secondary and the answer says so. The Apple half is always correct. A
    page-fetch tool would let the model read the release it finds (Future work).
-2. **Period mismatch.** Apple's figure is its full fiscal year to September 2025; Microsoft's
+
+   Before and after the evidence check, 2026-11-03: Query 2 run twice from `main` before PR #30
+   and twice after it, same machine and settings
+   ([full comparison](docs/query-run-results.md#before-and-after-the-evidence-check-2026-11-03)):
+
+   | | Before 1 | Before 2 | After 1 | After 2 |
+   |---|---|---|---|---|
+   | Microsoft web searches | 5 | 5 | 7, then `[Check]`, then 5 more | 6, then output ends |
+   | Evidence check | — | — | 2 gaps (`secondary_source`, `undated_or_stale`) → retry | no result recorded |
+   | Microsoft company-wide margin | not found | not found | 67.9% (FY2026), 67.2% (quarter to June 2026), aggregators, flagged secondary | — |
+   | Comparison with Apple's 46.9% | none | none | about 20–21 points higher, periods flagged | — |
+   | Primary Microsoft source | no | no | no | — |
+   | Round limit reached | no | no | yes | — |
+
+   The check makes the agent search harder and state the weakness of its evidence, and it can
+   turn "no comparison" into an approximate, caveated one. It does not reach a primary source:
+   before the check, the executor was already searching for the earnings release, 10-Q and
+   cost of revenue. The bottleneck is the search tool's snippets, not the agent's reasoning.
+   The saved output of After 2 ends after its second `calculate`, before the check's result.
+   Errors go to stderr, which the saved file did not capture, so that run is not counted.
+2. **A retry can use up the round budget.** Retry rounds share the 8-round limit. In After 1
+   the first pass used most of the budget (3 Filing searches, 7 web searches and 2
+   calculations) before the check, so the retry ended at the limit and the answer carried the "tool-call limit" note. It was still complete and
+   cited.
+3. **A search-results page can be cited.** Tavily sometimes returns a search-engine results
+   URL (After 1 cited a DuckDuckGo results page for Microsoft's revenue). The citation is
+   genuine but weak; the source is a list of links, not a publication.
+4. **Period mismatch.** Apple's figure is its full fiscal year to September 2025; Microsoft's
    "current" figure is a later fiscal year or quarter. The agent states the mismatch but does
    not align the periods.
-3. **Undated web results.** Tavily results usually have no `published_date`, so web citations
+5. **Undated web results.** Tavily results usually have no `published_date`, so web citations
    read "date unknown".
-4. **Run-to-run variation.** Query 2 has picked different Microsoft periods and sources across
+6. **Run-to-run variation.** Query 2 has picked different Microsoft periods and sources across
    runs. The live tests assert structure and the Apple figures, not a Microsoft figure, because
    web data drifts.
-5. **One Filing at a time.** The agent answers from a single 10-K (`FILING_PATH`); it cannot
+7. **One Filing at a time.** The agent answers from a single 10-K (`FILING_PATH`); it cannot
    compare two years of filings. Replacing the Filing triggers a re-index automatically.
-6. **"Top N" risk factors** are the first N listed in Item 1A, since the 10-K does not rank
+8. **"Top N" risk factors** are the first N listed in Item 1A, since the 10-K does not rank
    them; the answer says so.
-7. **No token or cost accounting** yet. The evidence check adds one model call per question,
+9. **No token or cost accounting** yet. The evidence check adds one model call per question,
    and a retry adds more (see [Performance](#performance)).
 
 ---
@@ -786,6 +813,16 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
 ├── .claude/                  Claude Code agents and skills (/implement-issue, /implement-milestone)
 └── scripts/                  repo-template tooling, not part of the product
 ```
+
+**How this maps to the layout in `docs/TASKS.md`:**
+
+| TASKS.md | This repo | Why |
+|---|---|---|
+| `src/tools/document_qa.py` | `src/tools/search_filing.py` (hybrid search) and `src/tools/get_passage.py` (open a Section, Note or Passage by reference), on top of the parser and index in `src/utils/` | Document QA is two tools so the model can search, then follow a cross-reference ("see Note 5") directly (Bonus 4). |
+| `src/tools/tavily_search.py` | `src/tools/tavily_search.py` (`web_search`) | Same file. |
+| — | `src/tools/calculator.py` (`calculate`) | The assignment asks for calculations; all arithmetic goes through this tool. |
+| `prompts/examples.txt` (optional) | not used | The planning step and the per-tool descriptions guide the model; few-shot examples were not needed for the two queries. |
+| `data/apple_10k_2023.htm` | `data/apple_10k_2025.htm` | The latest 10-K at the time of writing (FY2025). |
 
 ## Decision records
 

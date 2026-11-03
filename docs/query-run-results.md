@@ -273,3 +273,29 @@ EVIDENCE CHECKS:
 The guidance names the investor site and SEC filings because the model wrote it from the evidence. Neither the code nor the prompts contain them.
 
 **Remaining gap.** The search tool returns snippets, not the release's tables, so even a well-aimed retry rarely sees Microsoft's own income statement. A page-fetch tool is the next step (README → Future work).
+
+## Before and after the evidence check (2026-11-03)
+
+Query 2 run four times by hand with `python src/main.py --query "$Q" | tee <file>`: twice on `main` at `370384b` (before PR #30), twice on `main` at `9d19453` (after PR #30). Same machine, model and settings. stdout only; errors and warnings were not captured.
+
+| | Before 1 | Before 2 | After 1 | After 2 |
+|---|---|---|---|---|
+| Plan steps | 5 | 5 | 6 (adds a Microsoft `calculate` step) | 6 |
+| Microsoft web searches | 5 | 5 | 7, then `[Check]`, then 5 more (12) | 6, then the output ends |
+| Evidence check | — | — | 2 gaps: `secondary_source` (company-wide margin only from aggregators), `undated_or_stale` (not the latest quarter) → retry | no result in the saved output |
+| Microsoft company-wide gross margin | not found | not found | 67.9% FY2026 (Tickwind, Investing.com; Macroaxis 67.94%), 67.2% quarter to June 2026 (Yahoo-hosted article), all flagged secondary and undated | — |
+| Microsoft Q1 FY2027 (quarter to Sept 2026) | revenue $92.3B, operating margin ~50%, Cloud segment 66% (labelled not company-wide) | same | same; company-wide gross margin not found | — |
+| Comparison with Apple's 46.9% | none ("can't compare") | none | 67.9 − 46.9 = 21.0 points; 67.2 − 46.9 = 20.3 points, periods flagged | `67.2 − 46.9` computed, no answer printed |
+| Primary Microsoft source | no | no | no | — |
+| Round limit reached | no | no | yes (answer carries the limit note) | — |
+| Apple figure and reasons | 46.9%, MD&A + 5 risk factors | 46.9%, MD&A + 4 risk factors | 46.9%, MD&A + the most complete factor list | — |
+| Citations | 12 | 11 | 14 | — |
+
+**What changed.** The check identified the weak Microsoft evidence and sent the agent back with targeted guidance (10-Q, investor-relations release, income-statement line items). The answer moved from "no comparison" to an approximate comparison with an explicit Gaps section asking the reader to verify against Microsoft's filings.
+
+**What did not change.** None of the 28 Microsoft searches across the four runs returned Microsoft's own release or income statement. Before the check existed, the executor was already searching for exactly those documents, so the limit is the snippets the search tool returns.
+
+**New observations.**
+- After 1 reached the 8-round limit: the retry's 5 searches used the remaining budget.
+- After 1 cited a DuckDuckGo search-results URL as a source for Microsoft's revenue.
+- After 2's saved output ends after its second `calculate`, before the check's result and the answer. The cause was not captured (stderr was not saved), so the run is not counted.
