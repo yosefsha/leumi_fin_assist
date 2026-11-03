@@ -24,6 +24,7 @@ from cli.cli_app import (
     EXIT_INTERRUPTED,
     EXIT_OK,
     run_cli,
+    trace_observer,
 )
 from cli.cli_options import CliOptions, parse_cli_args
 from cli.question_session import CANCELLED_LINE, PROCESSING_LINE
@@ -135,8 +136,9 @@ def _run(
     read_line: Callable[[str], str] | None = None,
 ) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
-    build = (lambda observer: agent) if isinstance(agent, _StubAgent) else agent
-    status = run_cli(options, build, read_line or _lines(), out, err)
+    if not isinstance(agent, _StubAgent):
+        agent = agent(trace_observer(options, out))
+    status = run_cli(options, agent, read_line or _lines(), out, err)
     return status, out.getvalue(), err.getvalue()
 
 
@@ -183,7 +185,7 @@ def test_ctrl_c_while_the_answer_prints_cancels_only_that_question() -> None:
 
     agent = _StubAgent(result=_result(CitedAnswer(body="Hi.", sources=())))
     out, err = _InterruptingOut(), io.StringIO()
-    status = run_cli(CliOptions(), lambda _: agent, _lines("one", "two"), out, err)
+    status = run_cli(CliOptions(), agent, _lines("one", "two"), out, err)
     assert (status, agent.questions) == (EXIT_OK, ["one", "two"])
     assert err.getvalue() == f"{CANCELLED_LINE}\n{CANCELLED_LINE}\n"
 
@@ -400,6 +402,36 @@ def test_an_index_that_cannot_be_opened_is_one_startup_line(
     assert captured.err == (
         "Error: cannot open the Filing index: Cannot load the embedding model: offline\n"
     )
+
+
+def _main_with_agent(monkeypatch: pytest.MonkeyPatch, agent: _StubAgent, argv: list[str]) -> int:
+    monkeypatch.setattr(main_module, "build_agent", lambda *_: agent)
+    monkeypatch.setattr(main_module, "configure_logging", lambda level: None)
+    settings = Settings.from_mapping({"ANTHROPIC_API_KEY": "a", "TAVILY_API_KEY": "t"})
+    return main(argv, load_settings=lambda: settings)
+
+
+def test_a_cancelled_query_exits_130_at_once_without_waiting_for_tool_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exits: list[int] = []
+
+    def fake_exit(status: int) -> None:
+        exits.append(status)
+        raise SystemExit(status)
+
+    monkeypatch.setattr(main_module.os, "_exit", fake_exit)
+    with pytest.raises(SystemExit):
+        _main_with_agent(monkeypatch, _StubAgent(error=KeyboardInterrupt()), ["--query", "q"])
+    assert exits == [EXIT_INTERRUPTED]
+
+
+def test_an_index_error_during_a_question_is_not_reported_as_a_startup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = _StubAgent(error=EmbedderError("Embedding the query failed"))
+    with pytest.raises(EmbedderError):
+        _main_with_agent(monkeypatch, agent, ["--query", "q"])
 
 
 @pytest.fixture

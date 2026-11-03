@@ -25,23 +25,26 @@ _EXIT_STATUS = {
     QuestionOutcome.CANCELLED: EXIT_INTERRUPTED,
 }
 
-type AgentBuilder = Callable[[AgentObserver | None], QuestionAnswerer]
 type LineReader = Callable[[str], str]
+
+
+def trace_observer(options: CliOptions, out: TextIO) -> AgentObserver | None:
+    """The observer to build the agent with: a `TracePrinter` on `out`, or none under `--quiet`."""
+    return None if options.quiet else TracePrinter(out)
 
 
 def run_cli(
     options: CliOptions,
-    build_agent: AgentBuilder,
+    agent: QuestionAnswerer,
     read_line: LineReader,
     out: TextIO,
     err: TextIO,
 ) -> int:
-    """Build the agent once, then answer `options.query` or run the REPL; return the exit status.
+    """Answer `options.query` or run the REPL with `agent`; return the exit status.
 
-    Without `--quiet` the agent reports to a `TracePrinter` on `out`. With it, `out`
+    Build `agent` once, with `trace_observer(options, out)`. Under `--quiet`, `out`
     carries only answers and Sources; the prompt, caveats and errors go to `err`.
     """
-    agent = build_agent(None if options.quiet else TracePrinter(out))
     ui = err if options.quiet else out
     printer = AnswerPrinter(out, notices=ui)
     session = QuestionSession(agent, printer, out, err, show_progress=not options.quiet)

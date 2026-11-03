@@ -1,15 +1,16 @@
 """Command-line entry point: `python src/main.py [--query QUESTION] [--quiet] [--rebuild-index]`.
 
-Parses the options, loads the settings, configures logging and hands over to
-`run_cli`, which builds the agent once and answers one question or many.
+Parses the options, loads the settings, configures logging, builds the agent
+once and hands over to `run_cli`, which answers one question or many.
 """
 
 import contextlib
+import os
 import sys
 from collections.abc import Callable, Sequence
 
 from agent_factory import build_agent
-from cli.cli_app import EXIT_CONFIG_ERROR, EXIT_FAILURE, EXIT_INTERRUPTED, run_cli
+from cli.cli_app import EXIT_CONFIG_ERROR, EXIT_FAILURE, EXIT_INTERRUPTED, run_cli, trace_observer
 from cli.cli_options import parse_cli_args
 from utils.config import ConfigError, Settings
 from utils.filing_index_factory import INDEX_LOAD_ERRORS
@@ -31,19 +32,21 @@ def main(
         return EXIT_CONFIG_ERROR
     configure_logging(settings.log_level)
     try:
-        return run_cli(
-            options,
-            lambda observer: build_agent(settings, options.rebuild_index, observer),
-            input,
-            sys.stdout,
-            sys.stderr,
-        )
+        agent = build_agent(settings, options.rebuild_index, trace_observer(options, sys.stdout))
     except INDEX_LOAD_ERRORS as error:
         print(f"Error: cannot open the Filing index: {error}", file=sys.stderr)
         return EXIT_FAILURE
     except KeyboardInterrupt:  # while the index loads, before the prompt is up
         print(file=sys.stderr)
         return EXIT_INTERRUPTED
+    status = run_cli(options, agent, input, sys.stdout, sys.stderr)
+    if status == EXIT_INTERRUPTED:
+        # A cancelled --query may leave tool calls in flight on worker threads, which
+        # the interpreter would wait for at exit; nothing is left to clean up, so go now.
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(status)
+    return status
 
 
 if __name__ == "__main__":
