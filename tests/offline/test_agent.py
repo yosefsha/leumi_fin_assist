@@ -12,6 +12,7 @@ from datetime import date
 from typing import Any
 
 import pytest
+from anthropic.types import TextBlock
 
 from agent import MAX_TOOL_ROUNDS, ResearchAgent
 from agent_factory import build_tool_registry
@@ -20,7 +21,7 @@ from fakes.scripted_web_search_client import ScriptedWebSearchClient
 from tools.calculator import CalculateTool
 from tools.registry import ToolOutput, ToolRegistry
 from utils.agent_result import ToolCallRecord
-from utils.chat_model import ChatModelError, ChatModelRefusalError
+from utils.chat_model import ChatModelError, ChatModelRefusalError, IncompleteReplyError, ModelReply
 from utils.citation_format import CitationFormatter
 from utils.cited_answer import CitationResolver
 from utils.filing_index import FilingIndex
@@ -224,8 +225,11 @@ def test_sources_get_citation_ids_before_the_model_sees_them() -> None:
         '{"found": 1}\n\n[W1] Microsoft earnings — https://www.microsoft.com/en-us/investor '
         "(date unknown)\n"
     )
-    # The same Passage found again keeps its ID.
-    assert "[F1]" in _tool_results(model, 2)[0]["content"]
+    # The same Passage found again keeps its ID and is not resent in full.
+    assert _tool_results(model, 2)[0]["content"] == (
+        '{"found": 1}\n\n[F1] Item 8 > CONSOLIDATED STATEMENTS OF OPERATIONS — p. 29 '
+        "(passage_id item-8-003, table) (content shown above)"
+    )
     assert [record.citation_ids for record in result.trace] == [("F1",), ("W1",), ("F1",)]
     # Unknown markers ([W7], [F2]) are dropped; the rest are renumbered with Sources.
     assert result.answer.body == "R&D was $34,550M [1]. Microsoft's margin was 69% [2]."
@@ -286,8 +290,13 @@ def test_the_planner_may_only_name_registered_tools() -> None:
 
 @pytest.mark.parametrize(
     "plan_json",
-    ['{"steps": [{"tool": "calculate"}]}', "not json", ChatModelRefusalError("declined")],
-    ids=["invalid-step", "not-json", "refusal"],
+    [
+        '{"steps": [{"tool": "calculate"}]}',
+        "not json",
+        ChatModelRefusalError("declined"),
+        IncompleteReplyError("no complete JSON"),
+    ],
+    ids=["invalid-step", "not-json", "refusal", "incomplete"],
 )
 def test_an_unusable_plan_leaves_the_executor_without_one(
     plan_json: str | ChatModelError,
@@ -314,6 +323,26 @@ def test_a_final_turn_without_text_is_an_error() -> None:
     model = ScriptedChatModel([text_reply("   ")])
     with pytest.raises(ChatModelError, match="without an answer"):
         _agent(model, _registry(CalculateTool())).answer("question")
+
+
+def test_a_tool_call_cut_off_by_the_output_limit_is_an_error() -> None:
+    cut_off = tool_reply(("calculate", {"expression": "1 +"}))
+    model = ScriptedChatModel([ModelReply(content=cut_off.content, truncated=True)])
+    with pytest.raises(ChatModelError, match="output limit"):
+        _agent(model, _registry(CalculateTool())).answer("question")
+
+
+def test_a_cut_off_answer_is_flagged() -> None:
+    model = ScriptedChatModel([ModelReply(content=text_reply("1. First").content, truncated=True)])
+    result = _agent(model, _registry(CalculateTool())).answer("question")
+    assert result.answer_truncated
+    assert result.answer.body == "1. First"
+
+
+def test_text_blocks_are_joined_as_paragraphs() -> None:
+    blocks = ("Net sales [F1].", "  ", "R&D.")
+    reply = ModelReply(content=tuple(TextBlock(type="text", text=text) for text in blocks))
+    assert reply.text == "Net sales [F1].\n\nR&D."
 
 
 def test_an_empty_question_is_rejected() -> None:

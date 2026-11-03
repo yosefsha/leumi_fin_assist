@@ -7,7 +7,12 @@ from typing import Any
 import anthropic
 from anthropic.types import Message, MessageParam, ToolParam
 
-from utils.chat_model import ChatModelError, ChatModelRefusalError, ModelReply
+from utils.chat_model import (
+    ChatModelError,
+    ChatModelRefusalError,
+    IncompleteReplyError,
+    ModelReply,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +47,7 @@ class AnthropicChatModel:
         )
         reply = _reply(message)
         if reply.truncated or not reply.text:
-            raise ChatModelError(
+            raise IncompleteReplyError(
                 f"{self._model} returned no complete JSON (stop reason {message.stop_reason})."
             )
         return reply.text
@@ -77,6 +82,10 @@ class AnthropicChatModel:
             raise ChatModelError("Anthropic API timed out after retries.") from error
         except anthropic.APIConnectionError as error:
             raise ChatModelError("Could not connect to the Anthropic API.") from error
+        except anthropic.APIError as error:
+            raise ChatModelError(
+                f"Anthropic API call failed ({type(error).__name__}) for model {self._model}."
+            ) from error
         logger.debug(
             "%s: stop=%s input_tokens=%s output_tokens=%s",
             self._model,

@@ -11,7 +11,7 @@ import pytest
 from anthropic.types import Message, TextBlock, Usage
 
 from utils.anthropic_chat_model import AnthropicChatModel
-from utils.chat_model import ChatModelError, ChatModelRefusalError
+from utils.chat_model import ChatModelError, ChatModelRefusalError, IncompleteReplyError
 
 _FAKE_KEY = "sk-ant-offline-test-key-0123456789"
 _REQUEST = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
@@ -86,8 +86,14 @@ def test_a_refusal_is_a_refusal_error(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
         (anthropic.APITimeoutError(request=_REQUEST), "timed out"),
         (anthropic.APIConnectionError(request=_REQUEST), "Could not connect"),
+        (
+            anthropic.APIResponseValidationError(
+                response=httpx2.Response(200, request=_REQUEST), body=None
+            ),
+            "APIResponseValidationError",
+        ),
     ],
-    ids=["401", "timeout", "connection"],
+    ids=["401", "timeout", "connection", "malformed-response"],
 )
 def test_sdk_errors_become_key_free_chat_model_errors(
     monkeypatch: pytest.MonkeyPatch, error: Exception, reason: str
@@ -101,5 +107,5 @@ def test_sdk_errors_become_key_free_chat_model_errors(
 
 def test_a_json_reply_without_text_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
     model, _ = _patched(monkeypatch, _message("", stop_reason="max_tokens"))
-    with pytest.raises(ChatModelError, match="no complete JSON"):
+    with pytest.raises(IncompleteReplyError, match="no complete JSON"):
         model.generate_json("sys", "q", {})

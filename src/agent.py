@@ -4,9 +4,8 @@ import logging
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
-from typing import Any
 
-from anthropic.types import MessageParam, ToolResultBlockParam, ToolUseBlock
+from anthropic.types import MessageParam, TextBlockParam, ToolResultBlockParam, ToolUseBlock
 
 from tools.registry import ToolOutput, ToolRegistry
 from utils.agent_observer import AgentObserver, SilentObserver
@@ -40,8 +39,9 @@ class ResearchAgent:
        ones are dropped and the rest become a numbered Sources list.
 
     A tool failure is an `is_error` tool result for the model to work around. A
-    model failure (after the client's retries), a refusal, or a final turn with no
-    text raises `ChatModelError`.
+    model failure (after the client's retries), a refusal, a tool call cut off by
+    the output limit, or a final turn with no text raises `ChatModelError`. A final
+    answer cut off by the output limit is returned with `answer_truncated` set.
     """
 
     def __init__(
@@ -81,19 +81,28 @@ class ResearchAgent:
         messages: list[MessageParam] = [{"role": "user", "content": _task(question, plan)}]
         trace: list[ToolCallRecord] = []
 
-        for round_number in range(1, MAX_TOOL_ROUNDS + 1):
-            reply = self._model.respond(system, messages, definitions)
+        rounds = 0
+        while True:
+            tools_allowed = rounds < MAX_TOOL_ROUNDS
+            reply = self._model.respond(
+                system, messages, definitions, allow_tool_calls=tools_allowed
+            )
             messages.append({"role": "assistant", "content": list(reply.content)})
-            if not reply.tool_calls or reply.truncated:
-                return self._finish(question, plan, trace, reply, registry, hit_limit=False)
-            results = self._run_round(round_number, reply.tool_calls, registry, trace)
-            messages.append({"role": "user", "content": results})
-
-        logger.warning("Tool round limit (%d) reached; asking for a final answer.", MAX_TOOL_ROUNDS)
-        last_results: list[Any] = messages[-1]["content"]  # type: ignore[assignment]
-        last_results.append({"type": "text", "text": load_prompt(ROUND_LIMIT_PROMPT).strip()})
-        reply = self._model.respond(system, messages, definitions, allow_tool_calls=False)
-        return self._finish(question, plan, trace, reply, registry, hit_limit=True)
+            if reply.truncated and reply.tool_calls:
+                # A tool call cut off by the output limit has incomplete arguments.
+                raise ChatModelError("The model hit its output limit while calling a tool.")
+            if not reply.tool_calls or not tools_allowed:
+                return self._finish(
+                    question, plan, trace, reply, registry, hit_limit=not tools_allowed
+                )
+            rounds += 1
+            content: list[ToolResultBlockParam | TextBlockParam] = list(
+                self._run_round(rounds, reply.tool_calls, registry, trace)
+            )
+            if rounds == MAX_TOOL_ROUNDS:
+                logger.warning("Tool round limit (%d) reached; asking for an answer.", rounds)
+                content.append({"type": "text", "text": load_prompt(ROUND_LIMIT_PROMPT).strip()})
+            messages.append({"role": "user", "content": content})
 
     def _run_round(
         self,
@@ -154,13 +163,14 @@ class ResearchAgent:
         if not reply.text:
             raise ChatModelError("The model ended its turn without an answer.")
         if reply.truncated:
-            logger.warning("The final answer hit the output-token limit and may be cut short.")
+            logger.warning("The final answer hit the output-token limit and is cut short.")
         return AgentResult(
             question=question,
             plan=plan,
             trace=tuple(trace),
             answer=self._resolver.resolve(reply.text, registry),
             hit_round_limit=hit_limit,
+            answer_truncated=reply.truncated,
         )
 
 

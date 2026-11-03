@@ -32,11 +32,12 @@ def build_agent(
     receives the plan and each tool call as they happen.
     """
     index = open_filing_index(settings, force_rebuild=force_rebuild)
+    formatter = CitationFormatter(settings.filing_fiscal_year)
     return ResearchAgent(
         model=AnthropicChatModel(settings.anthropic_api_key, settings.anthropic_model),
         tools=build_tool_registry(index, TavilyWebSearchClient(settings.tavily_api_key)),
-        citer=ToolResultCiter(CitationFormatter(settings.filing_fiscal_year)),
-        resolver=CitationResolver(CitationFormatter(settings.filing_fiscal_year)),
+        citer=ToolResultCiter(formatter),
+        resolver=CitationResolver(formatter),
         fiscal_year=settings.filing_fiscal_year,
         observer=observer,
     )

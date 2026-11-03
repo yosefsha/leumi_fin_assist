@@ -21,6 +21,10 @@ class ChatModelRefusalError(ChatModelError):
     """The model declined the request (`stop_reason: refusal`)."""
 
 
+class IncompleteReplyError(ChatModelError):
+    """The model answered, but the reply lacks the content asked for (e.g. cut-off JSON)."""
+
+
 @dataclass(frozen=True)
 class ModelReply:
     """One assistant turn.
@@ -35,8 +39,9 @@ class ModelReply:
 
     @property
     def text(self) -> str:
-        """The reply's text blocks, joined."""
-        return "".join(block.text for block in self.content if block.type == "text").strip()
+        """The reply's non-empty text blocks, separated by blank lines."""
+        texts = (block.text.strip() for block in self.content if block.type == "text")
+        return "\n\n".join(text for text in texts if text)
 
     @property
     def tool_calls(self) -> tuple[ToolUseBlock, ...]:
@@ -50,8 +55,8 @@ class ChatModel(Protocol):
     def generate_json(self, system: str, prompt: str, schema: Mapping[str, Any]) -> str:
         """Return the model's answer to `prompt` as JSON text conforming to `schema`.
 
-        Raises `ChatModelRefusalError` if the model declines and `ChatModelError`
-        when the call fails or the reply holds no JSON.
+        Raises `ChatModelRefusalError` if the model declines, `IncompleteReplyError`
+        when the reply holds no complete JSON, and `ChatModelError` when the call fails.
         """
         ...
 

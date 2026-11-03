@@ -32,7 +32,8 @@ class AgentResult:
     """The outcome of answering one question.
 
     `hit_round_limit` is true when the model still wanted tools after the last
-    allowed round and was told to answer with what it had.
+    allowed round and was told to answer with what it had. `answer_truncated` is
+    true when the answer hit the model's output-token limit and is incomplete.
     """
 
     question: str
@@ -40,3 +41,4 @@ class AgentResult:
     trace: tuple[ToolCallRecord, ...]
     answer: CitedAnswer
     hit_round_limit: bool = False
+    answer_truncated: bool = False

@@ -7,7 +7,7 @@ from datetime import date
 from anthropic.types import ToolParam
 from pydantic import ValidationError
 
-from utils.chat_model import ChatModel, ChatModelRefusalError
+from utils.chat_model import ChatModel, ChatModelRefusalError, IncompleteReplyError
 from utils.plan import Plan
 from utils.prompts import render_prompt
 
@@ -22,7 +22,8 @@ class Planner:
     The reply is constrained to `Plan.json_schema` (structured outputs), so each
     step names a registered tool. A model refusal or a reply that still fails
     validation yields an empty Plan with a warning: the plan is guidance, and the
-    executor can answer without it. A failed API call propagates as `ChatModelError`.
+    executor can answer without it. So does a reply cut off before its JSON is
+    complete. A failed API call propagates as `ChatModelError`.
     """
 
     def __init__(self, model: ChatModel, fiscal_year: int) -> None:
@@ -42,8 +43,8 @@ class Planner:
         try:
             raw = self._model.generate_json(system, question, schema)
             return Plan.model_validate_json(raw)
-        except ChatModelRefusalError as error:
-            logger.warning("Planner declined; continuing without a plan: %s", error)
+        except (ChatModelRefusalError, IncompleteReplyError) as error:
+            logger.warning("Planner gave no plan; continuing without one: %s", error)
         except ValidationError as error:
             logger.warning("Planner returned an invalid plan; continuing without one: %s", error)
         return Plan()

@@ -8,6 +8,8 @@ from utils.citations import Citation, CitationRegistry
 from utils.passage import Passage
 from utils.web_result import WebResult
 
+SHOWN_ABOVE = "(content shown above)"
+
 
 @dataclass(frozen=True)
 class CitedToolResult:
@@ -22,8 +24,9 @@ class ToolResultCiter:
 
     The model-facing text is the tool's own `content` followed by one block per
     source, headed `[F#]` for a Filing Passage or `[W#]` for a web result. A
-    source seen earlier in the same query keeps its ID. Results without sources
-    (calculate, errors) pass through unchanged.
+    source seen earlier in the same query keeps its ID and is shown as its header
+    line only, marked as shown above, so repeated searches do not resend the same
+    content. Results without sources (calculate, errors) pass through unchanged.
     """
 
     def __init__(self, formatter: CitationFormatter) -> None:
@@ -31,11 +34,19 @@ class ToolResultCiter:
 
     def cite(self, output: ToolOutput, registry: CitationRegistry) -> CitedToolResult:
         """Register `output.sources` in `registry`; return the text for the `tool_result`."""
-        citations = [_register(source, registry) for source in output.sources]
-        blocks = [output.content, *(self._formatter.for_model(c) for c in citations)]
+        blocks = [output.content]
+        citation_ids: list[str] = []
+        for source in output.sources:
+            known = len(registry)
+            citation = _register(source, registry)
+            citation_ids.append(citation.citation_id)
+            if len(registry) > known:
+                blocks.append(self._formatter.for_model(citation))
+            else:
+                blocks.append(f"{self._formatter.header_for_model(citation)} {SHOWN_ABOVE}")
         return CitedToolResult(
             content="\n\n".join(block for block in blocks if block),
-            citation_ids=tuple(citation.citation_id for citation in citations),
+            citation_ids=tuple(citation_ids),
         )
 
 

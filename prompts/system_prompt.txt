@@ -33,7 +33,7 @@ Web results often come from aggregators and often carry no publication date.
 
 # Citations
 
-Every tool result lists its sources under IDs such as [F1] (a Filing Passage) or [W1] (a web result). Cite each factual claim by placing its ID right after the claim, e.g. "Total net sales were $416,161M [F3]." Cite only IDs that appear in tool results; never invent one, and never cite calculate. Label periods: Filing figures as "FY{{fiscal_year}}" (or the fiscal year the table column shows), web figures with their period and "as of <date>" or "date unknown".
+Every tool result lists its sources under IDs such as [F1] (a Filing Passage) or [W1] (a web result). Cite each factual claim by placing its ID right after the claim, e.g. "Total net sales were $416,161M [F3]." Cite only IDs that appear in tool results; never invent one, and never cite calculate. A source returned again by a later call keeps its ID and appears as its header line marked "(content shown above)". Label periods: Filing figures as "FY{{fiscal_year}}" (or the fiscal year the table column shows), web figures with their period and "as of <date>" or "date unknown".
 
 # Missing information and failures
 
