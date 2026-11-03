@@ -47,7 +47,7 @@ first, and update it after each merge. Snapshot as of 2026-11-03:
 | M1 — Foundation | #1 docs/ADRs, #2 scaffold + config + tool registry + Filing | ✅ merged |
 | M2 — Document QA | #3 filing parser → #4 chunker + hybrid index → #5 `search_filing` / `get_passage` | ✅ merged |
 | M3 — Web search & calc | #6 Tavily `web_search`, #7 `calculate` | ✅ merged |
-| M4 — Agent & CLI | #8 citation registry, #9 planner + executor, #10 CLI | #8 merged; #9 in review; #10 needs #9 |
+| M4 — Agent & CLI | #8 citation registry, #9 planner + executor, #10 CLI | #8, #9 merged; #10 in review |
 | M5 — Delivery | #21 offline test tier + CI, #11 live test queries, #12 user README | #21 merged; #11 needs #10; #12 last |
 
 Critical path: **#3 → #4 → #5 → #9 → #10 → #11 → #12**. Issues #6, #7 and #8 can run in
@@ -129,7 +129,16 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 │   ├── coding-instructions.md     ✅ design principles (SOLID, fail loudly, ports for external sources)
 │   └── backend-python-instructions.md ✅ Python style rules
 ├── src/
-│   ├── main.py                    #10 CLI entry point
+│   ├── main.py                    ✅ CLI entry point: options → settings → logging → `run_cli`
+│   ├── cli/
+│   │   ├── cli_options.py         ✅ `--query` / `--quiet` / `--rebuild-index` (argparse)
+│   │   ├── cli_app.py             ✅ `run_cli`: build the agent once, then one `--query` or the REPL; exit codes
+│   │   ├── repl.py                ✅ `> ` loop: `exit`/`quit`/Ctrl-D/Ctrl-C leave, blank lines ignored
+│   │   ├── question_session.py    ✅ one question: progress line, answer, one-line API error, Ctrl-C cancels
+│   │   ├── question_answerer.py   ✅ `QuestionAnswerer` protocol the CLI needs (`ResearchAgent` implements it)
+│   │   ├── trace_printer.py       ✅ `TracePrinter`: the `AgentObserver` that prints `[Plan]` / `[Tool: …]` live
+│   │   ├── tool_call_format.py    ✅ one-line tool-call descriptions (`search_filing(item="1A") "…"`, `calculate` result)
+│   │   └── answer_printer.py      ✅ the answer, its Sources, and round-limit / truncation notes
 │   ├── agent.py                   ✅ `ResearchAgent`: planner call, then the tool-use executor loop (≤ 8 rounds)
 │   ├── agent_factory.py           ✅ `build_agent(settings)`: the composition root (index + tools + Anthropic)
 │   ├── tools/
@@ -142,7 +151,7 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 │   └── utils/
 │       ├── config.py              ✅ `Settings`: .env + environment, validated, secrets kept out of repr/logs
 │       ├── prompts.py             ✅ `load_prompt(name)` reads prompts/<name>.txt; `render_prompt` fills `{{placeholders}}`
-│       ├── logging_config.py      ✅ logging setup
+│       ├── logging_config.py      ✅ logging to stderr; third-party libraries held at WARNING unless DEBUG
 │       ├── passage.py             ✅ `Passage` value object + `PassageKind`
 │       ├── filing_parser.py       ✅ `FilingParser`: HTML → Passages (Items, headings, risk factors, Notes)
 │       ├── filing_layout.py       ✅ HTML → ordered text/table/anchor blocks with page numbers
@@ -239,8 +248,20 @@ Real environment variables override `.env`, except blank ones. On the first run 
 embedding model is downloaded into `INDEX_DIR/models` and the index is built in
 `INDEX_DIR/chroma`. Later runs reuse the index unless the Filing changes.
 
-There is no CLI yet: `python src/main.py` arrives with #10. Until then the agent is reachable
-through `agent_factory.build_agent(Settings.load()).answer(question)`.
+### Running the agent
+
+```bash
+python src/main.py                                  # interactive: type a question at "> "; exit/quit/Ctrl-D leaves
+python src/main.py --query "What are Apple's top 3 risk factors …?"   # one question, then exit
+python src/main.py --query "…" --quiet              # stdout gets only the answer and its Sources
+python src/main.py --rebuild-index                  # rebuild the Filing index first
+```
+
+Without `--quiet`, each question shows `[Agent processing...]`, the `[Plan]`, and one
+`[Tool: …]` line per tool call as it runs, then the answer and Sources. Ctrl-C during a
+question cancels it and returns to the prompt. Logs go to stderr. Exit status: 0 success,
+1 model API failure (`--query`), 2 bad usage or configuration (such as a missing key),
+130 interrupted. The user-facing guide is #12.
 
 ---
 
