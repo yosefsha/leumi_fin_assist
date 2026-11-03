@@ -229,7 +229,7 @@ The agent retried once with a different query, then answered the half it could, 
 
 ## Known weaknesses to track
 
-1. **Competitor figures depend on what Tavily returns.** Primary sources (IR releases, 10-Q) were not found for Microsoft's latest quarter. Addressed in #29 by a model-driven evidence check rather than a domain allow-list (ADR-0006); see the #29 section below for what it changed.
+1. **Competitor figures depend on what Tavily returns.** Primary sources (IR releases, 10-Q) were not found for Microsoft's latest quarter. Addressed in #29 by a model-driven evidence check that judges the evidence and writes its own retry guidance (ADR-0006); see the #29 section below for what it changed.
 2. **Period alignment in comparisons.** "Current" for Microsoft and "latest 10-K" for Apple are different periods. The agent flags it but doesn't align them (for example, by comparing Apple's latest quarter).
 3. **No token or cost figures** were captured for these runs.
 4. **Run-to-run variation.** Query 2 picked different Microsoft periods (FY2026 vs fiscal Q4 2026) and sources between runs. Only repeated runs, as in the planned evaluation suite, can measure this.
@@ -247,7 +247,7 @@ The agent retried once with a different query, then answered the half it could, 
 
 ## 2026-11-03: evidence check (#29)
 
-The agent now checks its draft answer's evidence with one structured-output call and, when the check reports gaps, sends the executor back once with model-written retry guidance (ADR-0006). No domain or company list is coded. Same model, Filing and Tavily settings as above. Runs: `RUN_LIVE_TESTS=true pytest tests/test_queries.py -m live -s`. The `-s` log now prints each check and its guidance.
+The agent now checks its draft answer's evidence with one structured-output call and, when the check reports gaps, sends the executor back once with model-written retry guidance (ADR-0006). Same model, Filing and Tavily settings as above. Runs: `RUN_LIVE_TESTS=true pytest tests/test_queries.py -m live -s`. The `-s` log now prints each check and its guidance.
 
 | Run | Query | Result | Evidence check | Microsoft figure and its source |
 |---|---|---|---|---|

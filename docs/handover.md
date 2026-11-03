@@ -66,8 +66,8 @@ Undecided, and recorded in issue #15:
 2. `scripts/copy_repo.py` and `scripts/create_remote_project.py` (repo-template tooling, excluded
    from ruff) still describe the template's NestJS `ci.yml`, not this repo's.
 3. **Competitor figures from the web** (README → Known limitations): Microsoft's company-wide
-   gross margin is not reliably found through Tavily. #29 chose a model-driven evidence check
-   with one retry over a domain allow-list
+   gross margin is not reliably found through Tavily. #29 added a model-driven evidence check
+   that judges the evidence and retries once with its own guidance
    ([ADR-0006](adr/0006-model-driven-evidence-check.md)). The figure is now flagged and
    re-sought, but Tavily's snippets still rarely include Microsoft's own income statement. A
    page-fetch tool is the open follow-up.

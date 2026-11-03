@@ -1,8 +1,8 @@
-# A model-driven evidence check, not hard-coded source filters
+# A model-driven evidence check with model-written retries
 
 Query 2 asks for Microsoft's current company-wide gross margin. `web_search` usually returns the Microsoft Cloud *segment* margin, which Microsoft headlines, or aggregator pages with undated figures. The executor declined to pass the segment figure off as company-wide, but nothing in the flow noticed that its evidence was weak and tried again (issue #29).
 
-We add an **evidence check** between the executor's draft answer and the final answer. `EvidenceReviewer` makes one structured-output call through the `ChatModel` port, the same pattern as `Planner`, with its prompt in `prompts/evidence_check_prompt.txt`. The call gets the question, the plan, every tool call with the cited result the executor saw, and the draft. It returns an `EvidenceReview`: `sufficient`, plus `gaps`, each with a `requirement`, a `problem` (`missing`, `segment_not_company_wide`, `secondary_source`, `undated_or_stale`, `period_mismatch`, `other`) and `retry_guidance`. When it lists gaps, they go back to the executor as a user turn (`prompts/evidence_retry.txt`) and the tool loop continues. **The model decides the follow-up searches; code names no company, domain or source.**
+We add an **evidence check** between the executor's draft answer and the final answer. `EvidenceReviewer` makes one structured-output call through the `ChatModel` port, the same pattern as `Planner`, with its prompt in `prompts/evidence_check_prompt.txt`. The call gets the question, the plan, every tool call with the cited result the executor saw, and the draft. It returns an `EvidenceReview`: `sufficient`, plus `gaps`, each with a `requirement`, a `problem` (`missing`, `segment_not_company_wide`, `secondary_source`, `undated_or_stale`, `period_mismatch`, `other`) and `retry_guidance`. When it lists gaps, they go back to the executor as a user turn (`prompts/evidence_retry.txt`) and the tool loop continues. **The model decides the follow-up searches from what the evidence lacks, so the same check works for any company, metric or source.**
 
 Bounds:
 

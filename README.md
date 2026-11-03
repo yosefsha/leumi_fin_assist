@@ -374,7 +374,7 @@ Three stages, all driven by prompts in `prompts/`:
    `period_mismatch`, `other`) and `retry_guidance`. Gaps go back to the executor as a user
    turn, and tool use resumes. The model writes the guidance (for example "find the latest
    earnings release's revenue and cost of revenue and compute the margin with `calculate`"), so
-   no company, domain or source list is coded anywhere.
+   the same check works for any company, metric or source.
 
 ### How information flows
 
@@ -712,8 +712,8 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
    (67.8%). In another it found none and the answer named the gap. In the third, an earlier
    version of the check prompt, the retry ran into the round limit. In none of the runs did
    Tavily (finance topic, 5 snippets) return Microsoft's own release or income statement, so
-   the inputs stay secondary and the answer says so. The Apple half is always correct. No source
-   allow-list is used, by design.
+   the inputs stay secondary and the answer says so. The Apple half is always correct. A
+   page-fetch tool would let the model read the release it finds (Future work).
 2. **Period mismatch.** Apple's figure is its full fiscal year to September 2025; Microsoft's
    "current" figure is a later fiscal year or quarter. The agent states the mismatch but does
    not align the periods.
@@ -795,7 +795,7 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
 | [0002](docs/adr/0002-local-embeddings-and-passage-retrieval.md) | Local fastembed embeddings + BM25 hybrid retrieval over Passages; 350-token entries; fail on > 512 tokens. |
 | [0003](docs/adr/0003-no-xbrl-fact-tool.md) | No XBRL fact tool: figures come from rendered tables, arithmetic from `calculate`. |
 | [0004](docs/adr/0004-hybrid-test-tiers-and-ci.md) | Two test tiers: offline tests in CI on every PR; live query tests only with `RUN_LIVE_TESTS=true`. |
-| [0006](docs/adr/0006-model-driven-evidence-check.md) | A model-driven evidence check judges the draft's evidence and may send the executor back once; no hard-coded domains or source lists. |
+| [0006](docs/adr/0006-model-driven-evidence-check.md) | A model-driven evidence check judges the draft's evidence and may send the executor back once with model-written retry guidance. |
 
 Smaller decisions (hand-written agent loop, structured-output planner, code-assigned citation
 IDs, the 8-round cap) are recorded in the bodies of issues #8 and #9.
