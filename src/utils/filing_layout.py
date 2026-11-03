@@ -10,10 +10,17 @@ tables, the Table of Contents' anchor targets, and the printed page of each bloc
 
 import re
 import warnings
-from dataclasses import dataclass
 
 from bs4 import BeautifulSoup, NavigableString, Tag, XMLParsedAsHTMLWarning
 
+from utils.filing_blocks import (
+    AnchorBlock,
+    Block,
+    FilingLayout,
+    PageNumber,
+    TableBlock,
+    TextBlock,
+)
 from utils.html_text import emphasis, normalize_whitespace, visible_text
 from utils.table_renderer import TableRenderer
 
@@ -22,57 +29,7 @@ _PAGE_FOOTER = re.compile(r"Form 10-K\s*\|\s*(\d+)$")
 _PAGE_BREAK = re.compile(r"page-break-(?:after|before)\s*:\s*always")
 _INTERNAL_LINK = re.compile(r"^#.")
 _STRUCTURAL_TAGS = ("div", "table", "hr")
-
-
-@dataclass(frozen=True)
-class TextBlock:
-    """One paragraph-level `<div>` outside any table."""
-
-    text: str
-    page_index: int
-    bold: bool
-    """Every visible character is bold."""
-    italic: bool
-    """Every visible character is italic."""
-
-
-@dataclass(frozen=True)
-class TableBlock:
-    """One `<table>`, already rendered to Markdown."""
-
-    markdown: str
-    page_index: int
-
-
-@dataclass(frozen=True)
-class AnchorBlock:
-    """An element the Table of Contents links to; `item` is set when it starts an Item."""
-
-    target_id: str
-    item: str | None
-
-
-Block = TextBlock | TableBlock | AnchorBlock
-
-
-@dataclass(frozen=True)
-class PageNumber:
-    """The page a block is printed on."""
-
-    number: int | None
-    approximate: bool
-
-
-@dataclass(frozen=True)
-class FilingLayout:
-    """The Filing as an ordered block stream plus the page of each physical page."""
-
-    blocks: tuple[Block, ...]
-    pages: tuple[PageNumber, ...]
-    """Indexed by a block's `page_index` (the physical page, counting from 0)."""
-
-    def page_of(self, block: TextBlock | TableBlock) -> PageNumber:
-        return self.pages[block.page_index]
+_HIDDEN = re.compile(r"display\s*:\s*none")
 
 
 class FilingLayoutReader:
@@ -101,18 +58,26 @@ class FilingLayoutReader:
 
     @staticmethod
     def _toc_targets(soup: BeautifulSoup) -> dict[str, str | None]:
-        """Map each internal link target to the Item it starts (`None` for other targets)."""
+        """Map each navigation-table link target to the Item it starts (`None` otherwise).
+
+        Only links inside a Table of Contents or index table count, so a
+        cross-reference link in body text never splits a Passage. When several
+        targets claim the same Item, the first one in document order wins.
+        """
         targets: dict[str, str | None] = {}
-        for link in soup.find_all("a", href=True):
-            href = link["href"]
-            if not href.startswith("#") or len(href) == 1:
+        claimed: set[str] = set()
+        for table in soup.find_all("table"):
+            if not _is_navigation(table):
                 continue
-            match = _ITEM_LINK.match(visible_text(link))
-            target = href[1:]
-            if match:
-                targets[target] = f"Item {match.group(1).upper()}"
-            else:
-                targets.setdefault(target, None)
+            for link in table.find_all("a", href=_INTERNAL_LINK):
+                target = link["href"][1:]
+                match = _ITEM_LINK.match(visible_text(link))
+                item = f"Item {match.group(1).upper()}" if match else None
+                if item is not None and item not in claimed and targets.get(target) is None:
+                    claimed.add(item)
+                    targets[target] = item
+                else:
+                    targets.setdefault(target, None)
         return targets
 
     @staticmethod
@@ -163,18 +128,26 @@ class _Walk:
             if _PAGE_BREAK.search(tag.get("style", "")):
                 self.page_index += 1
             return
-        target = tag.get("id")
-        if target in self._targets:
-            self.blocks.append(AnchorBlock(target, self._targets[target]))
+        if _HIDDEN.search(tag.get("style", "")):
+            return
+        self._add_anchor(tag)
         if tag.name == "table":
             self._add_table(tag)
         elif tag.find(_STRUCTURAL_TAGS):
             self.visit(tag)
         else:
+            # A leaf paragraph: a link target may sit on an inline element inside it.
+            for inline in tag.find_all(id=True):
+                self._add_anchor(inline)
             text = visible_text(tag)
             if text:
                 bold, italic = emphasis(tag)
                 self._add_text(text, bold=bold, italic=italic)
+
+    def _add_anchor(self, tag: Tag) -> None:
+        target = tag.get("id")
+        if target in self._targets:
+            self.blocks.append(AnchorBlock(target, self._targets[target]))
 
     def _add_table(self, table: Tag) -> None:
         if _is_navigation(table):

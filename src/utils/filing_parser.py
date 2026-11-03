@@ -4,15 +4,15 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from utils.filing_layout import (
+from utils.filing_blocks import (
     AnchorBlock,
     Block,
     FilingLayout,
-    FilingLayoutReader,
     PageNumber,
     TableBlock,
     TextBlock,
 )
+from utils.filing_layout import FilingLayoutReader
 from utils.passage import Passage, PassageKind
 from utils.table_renderer import TableRenderer
 
@@ -23,7 +23,7 @@ _RISK_FACTORS_ITEM = "Item 1A"
 _FINANCIAL_STATEMENTS_ITEM = "Item 8"
 
 _ITEM_HEADING = re.compile(r"^Item\s+(\d+[A-C]?)\.", re.IGNORECASE)
-_NOTE_HEADING = re.compile(r"^Note\s+\d+\s*[–-]\s*\S")
+_NOTE_HEADING = re.compile(r"^Note\s+\d+\s*[–—:.-]\s*\S")
 # Navigation labels that close the open section but are not part of any Section Path.
 _STRUCTURAL_HEADING = re.compile(r"^(?:PART\s+[IV]+|TABLE OF CONTENTS)$", re.IGNORECASE)
 _HAS_LETTER = re.compile(r"[^\W\d_]")
@@ -89,16 +89,17 @@ class FilingParser:
             for index, block in enumerate(blocks)
             if isinstance(block, AnchorBlock) and block.item
         }
-        if anchored:
-            return anchored
-        # Fallback: the last heading per Item, so an earlier mention never wins.
+        # Fallback for each Item the ToC does not link: its last bold heading, so an
+        # earlier mention never wins.
+        linked = set(anchored.values())
         last_heading: dict[str, int] = {}
         for index, block in enumerate(blocks):
             if isinstance(block, TextBlock) and _is_heading(block):
                 match = _ITEM_HEADING.match(block.text)
-                if match:
-                    last_heading[f"Item {match.group(1).upper()}"] = index
-        return {index: label for label, index in last_heading.items()}
+                label = f"Item {match.group(1).upper()}" if match else None
+                if label is not None and label not in linked:
+                    last_heading[label] = index
+        return anchored | {index: label for label, index in last_heading.items()}
 
 
 def _is_heading(block: TextBlock) -> bool:
@@ -130,6 +131,11 @@ class _Draft:
     is_item_heading: bool = False
     """Opened by the Item's own heading (`Item 6. [Reserved]`)."""
 
+    def finish(self) -> "_Finished":
+        return _Finished(
+            self.item, self.section_path, self.page, self.kind, "\n\n".join(self.lines)
+        )
+
 
 @dataclass(frozen=True)
 class _Finished:
@@ -147,6 +153,7 @@ class _PassageAssembler:
         self._layout = layout
         self._item_starts = item_starts
         self._item = FRONT_MATTER
+        self._item_title = FRONT_MATTER
         self._headings: list[_Heading] = []
         self._draft: _Draft | None = None
         self._caption: str | None = None
@@ -176,6 +183,7 @@ class _PassageAssembler:
         self._flush()
         self._close_item()
         self._item = item
+        self._item_title = item
         self._headings = []
         self._item_first_slot = len(self._slots)
 
@@ -196,6 +204,7 @@ class _PassageAssembler:
         if _ITEM_HEADING.match(text):
             self._flush()
             self._headings = []
+            self._item_title = text
             self._open(block, PassageKind.SECTION, heading=text).is_item_heading = True
             return
         if self._item == _FINANCIAL_STATEMENTS_ITEM and _NOTE_HEADING.match(text):
@@ -223,18 +232,23 @@ class _PassageAssembler:
 
     def _on_table(self, block: TableBlock) -> None:
         caption = self._take_caption()
-        path = self._section_path()
-        title = path[-1]
+        # Open the surrounding text draft first, so its slot precedes the table's.
+        draft = self._draft_for(block)
+        title = self._headings[-1].title if self._headings else self._item_title
         lines = [f"## {title}"]
         if caption:
             lines.append(caption)
         lines.append(block.markdown)
         self._slots.append(
             _Finished(
-                self._item, path, self._layout.page_of(block), PassageKind.TABLE, "\n\n".join(lines)
+                self._item,
+                self._section_path(),
+                self._layout.page_of(block),
+                PassageKind.TABLE,
+                "\n\n".join(lines),
             )
         )
-        self._draft_for(block).lines.append(f"_[Table: {caption or title}]_")
+        draft.lines.append(f"_[Table: {caption or title}]_")
 
     # -- helpers ---------------------------------------------------------------------
 
@@ -297,18 +311,14 @@ class _PassageAssembler:
             if draft.is_item_heading:
                 self._bare_item_heading = draft
             return
-        self._slots[draft.slot] = _Finished(
-            draft.item, draft.section_path, draft.page, draft.kind, "\n\n".join(draft.lines)
-        )
+        self._slots[draft.slot] = draft.finish()
 
     def _close_item(self) -> None:
         """Keep a heading-only Item (`Item 6. [Reserved]`) when it yielded no other Passage."""
         draft, self._bare_item_heading = self._bare_item_heading, None
         produced = any(slot is not None for slot in self._slots[self._item_first_slot :])
         if draft is not None and not produced:
-            self._slots[draft.slot] = _Finished(
-                draft.item, draft.section_path, draft.page, draft.kind, "\n\n".join(draft.lines)
-            )
+            self._slots[draft.slot] = draft.finish()
 
     def _numbered(self) -> tuple[Passage, ...]:
         counters: dict[str, int] = {}

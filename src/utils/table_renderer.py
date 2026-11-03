@@ -105,8 +105,11 @@ class TableRenderer:
         pending_prefix: _Cell | None = None
         for cell in cells:
             if cell.text in _PREFIX_CELLS:
+                # Consecutive prefixes (`$` then `(`) chain onto the same figure.
                 if pending_prefix is not None:
-                    merged.append(pending_prefix)
+                    cell = _Cell(
+                        pending_prefix.text + cell.text, pending_prefix.start, cell.end, cell.bold
+                    )
                 pending_prefix = cell
                 continue
             if cell.text in _SUFFIX_CELLS and merged and pending_prefix is None:
