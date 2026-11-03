@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Stack decision: a Python CLI agent in the `docs/TASKS.md` layout, no CI workflow — see `docs/adr/0001-cli-agent-assignment-layout-no-ci.md`.
+Stack decision: a Python CLI agent in the `docs/TASKS.md` layout — see `docs/adr/0001-cli-agent-assignment-layout-no-ci.md`. Testing: an offline pytest tier plus `ruff` in `.github/workflows/ci.yml` on every PR, and live query tests that run only when `RUN_LIVE_TESTS=true` — see `docs/adr/0004-hybrid-test-tiers-and-ci.md`.
 
 ## Coding Instructions
 

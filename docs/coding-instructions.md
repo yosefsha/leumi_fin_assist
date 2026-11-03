@@ -30,4 +30,4 @@ Also standard, and not negotiable per-feature:
 - **DRY within a bounded context, not across the repo.** Two things that merely look alike are not duplication; coupling them because of the resemblance is worse than repeating them.
 - **Fail loudly at the boundary.** Validate input where it enters the process and reject it there. Never swallow an exception to keep a request alive, and never let a transport-level error (an HTTP client error, a driver error) reach a caller that has no way to interpret it.
 - **Make illegal states unrepresentable.** Immutable value objects, exhaustive types, no optional field that is really required — lean on the type system rather than on a runtime check a later caller can skip.
-- **Every public function is typed, named for what it does in domain terms, and covered by a test for its failure path as well as its success path.**
+- **Every public function is typed and named for what it does in domain terms.** Tests cover each issue's acceptance criteria and the failure paths at each tool's boundary (invalid arguments, an unavailable source, nothing found), not every public function (`docs/adr/0004-hybrid-test-tiers-and-ci.md`).
