@@ -122,7 +122,8 @@ class ResearchAgent:
                 round=round_number,
                 name=call.name,
                 args=dict(call.input) if isinstance(call.input, dict) else {},
-                error=output.content if output.is_error else None,
+                output=output.content,
+                is_error=output.is_error,
                 citation_ids=cited.citation_ids,
             )
             if output.is_error:
