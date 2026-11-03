@@ -1,14 +1,15 @@
-"""Runs the CLI once its options are parsed: a single `--query`, or the interactive REPL."""
+"""Runs the CLI once its options are parsed: a single question, or the interactive REPL."""
 
 from collections.abc import Callable
 from typing import TextIO
 
 from cli.answer_printer import AnswerPrinter
 from cli.cli_options import CliOptions
+from cli.menu import Menu
 from cli.question_answerer import QuestionAnswerer
 from cli.question_outcome import QuestionOutcome
 from cli.question_session import QuestionSession
-from cli.repl import Repl
+from cli.repl import QUESTION_LABEL, Repl
 from cli.trace_printer import TracePrinter
 from utils.agent_observer import AgentObserver
 
@@ -16,8 +17,6 @@ EXIT_OK = 0
 EXIT_FAILURE = 1
 EXIT_CONFIG_ERROR = 2
 EXIT_INTERRUPTED = 130
-
-BANNER = "Ask a question about the filing, or type 'exit' to quit."
 
 _EXIT_STATUS = {
     QuestionOutcome.ANSWERED: EXIT_OK,
@@ -39,22 +38,23 @@ def run_cli(
     read_line: LineReader,
     out: TextIO,
     err: TextIO,
+    menu: Menu,
 ) -> int:
     """Answer `options.query` or run the REPL with `agent`; return the exit status.
 
     Build `agent` once, with `trace_observer(options, out)`. Under `--quiet`, `out`
-    carries only answers and Sources; the prompt, caveats and errors go to `err`.
+    carries only answers and Sources; the menu, prompt, caveats and errors go to `err`.
     """
     ui = err if options.quiet else out
     printer = AnswerPrinter(out, notices=ui)
     session = QuestionSession(agent, printer, out, err, show_progress=not options.quiet)
     if options.query is not None:
+        if options.announce_query:
+            print(f"{QUESTION_LABEL}{options.query}", file=ui, flush=True)
         return _EXIT_STATUS[session.ask(options.query)]
     if options.quiet:
         read_line = _prompting_on(err, read_line)
-    else:
-        print(BANNER, file=out, flush=True)
-    return Repl(session, read_line, ui).run()
+    return Repl(session, read_line, ui, menu).run()
 
 
 def _prompting_on(stream: TextIO, read_line: LineReader) -> LineReader:

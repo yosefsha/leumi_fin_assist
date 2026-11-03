@@ -14,9 +14,16 @@ It is built for the two test queries of the assignment ([`docs/TASKS.md`](docs/T
    does Apple cite in their 10-K for any margin pressure?"*
 
 ```
-$ python src/main.py
-Ask a question about the filing, or type 'exit' to quit.
-> What are Apple's top 3 risk factors mentioned in their latest 10-K, and what percentage of total revenue did they spend on R&D?
+$ finassist
+Financial Research Assistant — Apple 10-K (FY2025) + web search
+Try one of these, or type your own question:
+  1) What are Apple's top 3 risk factors mentioned in their latest 10-K, and what percentage of total revenue did they spend on R&D?
+  2) How does Apple's gross margin compare to Microsoft's current gross margin, and what reasons does Apple cite in their 10-K for any margin pressure?
+  …
+  6) By what percentage did Apple's Services net sales grow from fiscal 2024 to fiscal 2025?
+Type a number, a question, 'help' to show this list again, or 'exit' to quit.
+> 1
+Question: What are Apple's top 3 risk factors mentioned in their latest 10-K, and what percentage of total revenue did they spend on R&D?
 [Agent processing...]
 [Plan] 1) get_passage — Fetch 'Item 1A' to get the outline of Apple's risk factors …
        2) get_passage — Fetch the first three risk factors from the Item 1A outline …
@@ -72,12 +79,14 @@ embedding model and the index.
    cd leumi_fin_assist
    ```
 
-2. **Create a Python 3.12 virtual environment and install the dependencies.**
+2. **Create a Python 3.12 virtual environment, install the dependencies and the `finassist`
+   command.**
 
    ```bash
    python3.12 -m venv .venv
    source .venv/bin/activate          # Windows: .venv\Scripts\activate
    pip install -r requirements.txt
+   pip install -e .                   # installs the finassist command into the venv
    ```
 
    If `python3.12` is not found, [uv](https://docs.astral.sh/uv/) fetches a 3.12 interpreter for you:
@@ -86,7 +95,13 @@ embedding model and the index.
    uv venv --python 3.12 .venv
    source .venv/bin/activate
    uv pip install -r requirements.txt
+   uv pip install -e .
    ```
+
+   Install it **editable** (`-e`): the command runs the code in `src/` and reads `prompts/`,
+   `data/` and `.env` from this checkout, so it works from any directory while the venv is
+   active. `pip install -e .` alone also installs the dependencies (it reads
+   `requirements.txt`). Without the install, `python src/main.py` takes the same arguments.
 
 3. **The Filing is already in the repository**: `data/apple_10k_2025.htm`, Apple's 10-K for the
    fiscal year ended September 27, 2025 (accession `0000320193-25-000079`, filed 2025-10-31).
@@ -109,7 +124,7 @@ embedding model and the index.
 5. **Run it.**
 
    ```bash
-   python src/main.py
+   finassist                  # or: python src/main.py
    ```
 
    The **first run** downloads the embedding model (`BAAI/bge-small-en-v1.5`, about 130 MB) into
@@ -122,7 +137,7 @@ embedding model and the index.
    Hugging Face's Xet transfer and retry; CI does the same:
 
    ```bash
-   HF_HUB_DISABLE_XET=1 python src/main.py
+   HF_HUB_DISABLE_XET=1 finassist
    ```
 
 ---
@@ -130,24 +145,36 @@ embedding model and the index.
 ## Running the agent
 
 ```bash
-python src/main.py                         # interactive prompt
-python src/main.py --query "QUESTION"      # answer one question, then exit
-python src/main.py --query "QUESTION" --quiet   # stdout gets only the answer and its Sources
-python src/main.py --rebuild-index         # rebuild the Filing index first, even if current
-python src/main.py --help
+finassist                            # interactive prompt with a menu of suggested questions
+finassist "QUESTION"                 # answer one question, then exit
+finassist 2                          # run suggested question 2, then exit
+finassist --quiet "QUESTION"         # stdout gets only the answer and its Sources
+finassist --rebuild-index            # rebuild the Filing index first, even if current
+finassist --help                     # usage, examples and the numbered suggested questions
 ```
 
-- **Interactive mode** prints a banner and a `> ` prompt. Type a question and press Enter.
-  `exit`, `quit`, Ctrl-D, or Ctrl-C at the prompt leaves (exit status 0). Blank lines are
-  ignored. Ctrl-C **while a question is running** cancels that question (`[Cancelled]`) and
-  returns to the prompt.
+`python src/main.py` is equivalent and takes the same arguments (`python src/main.py "QUESTION"`,
+`python src/main.py 1`), as does the original `--query QUESTION` form, which stays as an alias:
+`python src/main.py --query "QUESTION"` is the form [`docs/TASKS.md`](docs/TASKS.md) shows.
+
+- **Interactive mode** prints a title, the numbered suggested questions (from
+  [`prompts/suggested_questions.txt`](prompts/suggested_questions.txt)) and a `> ` prompt. Type
+  a number to run that suggestion (the question is echoed as `Question: …` first), or type your
+  own question. `help` or `?` lists the suggestions again; a number with no suggestion gets a
+  one-line message. `exit`, `quit`, Ctrl-D, or Ctrl-C at the prompt leaves (exit status 0).
+  Blank lines are ignored. Ctrl-C **while a question is running** cancels that question
+  (`[Cancelled]`) and returns to the prompt.
+- **A single question** comes as the argument (`finassist "QUESTION"`) or with `--query`. An
+  argument that is only a number runs that suggested question (`finassist 1`); a number with
+  no suggestion is a usage error (exit status 2).
 - **Each answer** is preceded by `[Agent processing...]`, the `[Plan]`, and one `[Tool: …]` line
   per tool call as it runs (`[Tool error: … — reason]` for a failed call; `calculate` shows its
   result). A `[Check] …` line reports the evidence check on the draft answer: `evidence
   sufficient`, or `<n> gap(s): <requirement> — <problem> → retrying` when the agent goes back
   for more evidence. Then the answer and a numbered **Sources** list.
-- **`--quiet`** drops the progress line, plan, trace and `[Check]` lines. stdout then carries only answers and
-  Sources; the prompt, notes and errors go to stderr.
+- **`--quiet`** drops the progress line, plan, trace and `[Check]` lines. stdout then carries
+  only answers and Sources; the menu, the prompt, the `Question: …` echo, notes and errors go
+  to stderr.
 - **Logs** go to stderr at `LOG_LEVEL` (default `INFO`). Third-party libraries are only shown
   at WARNING and above unless `LOG_LEVEL=DEBUG`, which also logs token usage per model call.
 
@@ -157,9 +184,19 @@ Exit statuses are listed in the [CLI spec](#cli).
 
 ## How to run the test queries
 
-**Interactively** — start `python src/main.py` and paste either query at the `> ` prompt.
+The two test queries are suggestions 1 and 2.
 
-**One at a time** (copy-paste ready):
+**Interactively** — start `finassist` and type `1` or `2` at the `> ` prompt (or paste either
+query).
+
+**One at a time:**
+
+```bash
+finassist 1          # Query 1: risk factors + R&D share of revenue
+finassist 2          # Query 2: Apple vs Microsoft gross margin + margin pressure
+```
+
+The equivalent long forms, as [`docs/TASKS.md`](docs/TASKS.md) runs the agent (copy-paste ready):
 
 ```bash
 python src/main.py --query "What are Apple's top 3 risk factors mentioned in their latest 10-K, and what percentage of total revenue did they spend on R&D?"
@@ -195,13 +232,14 @@ skipping it. See [ADR-0004](docs/adr/0004-hybrid-test-tiers-and-ci.md).
 ```bash
 pip install ruff            # the linter is a development tool, not in requirements.txt
 ruff check .
-pytest -m "not live"        # 181 tests, about 20–70 s (most of it embedding the Filing once)
+pytest -m "not live"        # 215 tests, about 20–70 s (most of it embedding the Filing once)
 ```
 
 Plain `pytest` runs the offline tier and reports the two live tests as skipped.
 
-**In CI** — `.github/workflows/ci.yml` runs `ruff check .` and `pytest -m "not live"` on every
-pull request and every push to `main`. `.github/workflows/live-tests.yml` runs the live tier
+**In CI** — `.github/workflows/ci.yml` installs the `finassist` command, runs `finassist --help`
+from outside the project, then `ruff check .` and `pytest -m "not live"`, on every pull request
+and every push to `main`. `.github/workflows/live-tests.yml` runs the live tier
 only on a manual "Run workflow", or on pushes to `main` touching `src/` or `prompts/` when the
 repository variable `RUN_LIVE_TESTS` is `true` (it is left unset). It uses its own
 `ANTHROPIC_API_KEY` / `TAVILY_API_KEY` repository secrets.
@@ -307,7 +345,7 @@ from secondary sources. The three #29 runs are in
 ## Architecture overview
 
 ```
-                      python src/main.py  (cli/: options, REPL or --query, live trace, exit codes)
+          finassist / python src/main.py  (cli/: options, menu + REPL or one question, trace, exit codes)
                                    │ question
                                    ▼
  ┌──────────────────────────── ResearchAgent (src/agent.py) ─────────────────────────────┐
@@ -404,6 +442,7 @@ failing if a placeholder and its value don't match.
 | `tool_descriptions.txt` | One `## <tool>` section per tool, used as the tool's `description` for both the planner and the executor. |
 | `round_limit.txt` | Appended after the 8th tool round: answer now with the evidence gathered, cite only known IDs, and name what is missing. |
 | `evidence_check_prompt.txt` | The evidence check: what each gap `problem` means, which gaps not to report (wording, facts the question does not ask for, Filing facts to replace with newer ones), how to write retry guidance (company's own statements first, components plus `calculate` when a ratio is not stated, new query wording, never a segment for the company), at most three gaps, one per fact. Placeholders `{{fiscal_year}}`, `{{today}}`, `{{tools}}`. |
+| `suggested_questions.txt` | The CLI's numbered suggested questions, one per line (`#` comments): the two test queries first, then a Filing-only, a web-only, a cross-reference (Note) and a calculation question. Not sent to the model. |
 | `evidence_retry.txt` | The user turn that sends the gaps back: the numbered gaps with their guidance, the tool rounds left, and "write the complete answer again". Placeholders `{{gaps}}`, `{{rounds_left}}`. |
 
 ---
@@ -417,8 +456,8 @@ Passage, Index Entry, Table Card, Citation) are defined in [`CONTEXT.md`](CONTEX
 
 | Module | Responsibility |
 |---|---|
-| `src/main.py` | Entry point: parse options → load `Settings` → configure logging → `build_agent` → `run_cli`. |
-| `src/cli/` | `cli_options` (argparse), `cli_app` (`run_cli`, exit codes), `repl`, `question_session` (one question: progress, answer, error, Ctrl-C), `trace_printer` + `tool_call_format` (live `[Plan]` / `[Tool: …]` / `[Check] …`), `answer_printer` (answer, Sources, notes), `question_answerer` (the port the CLI needs). |
+| `src/main.py` | Entry point (`main`, also the `finassist` console script): load the suggested questions → parse options → load `Settings` → configure logging → `build_agent` → `run_cli`. |
+| `src/cli/` | `cli_options` (argparse), `cli_app` (`run_cli`, exit codes), `repl`, `menu` + `suggested_questions` (the numbered suggestions and the welcome screen), `question_session` (one question: progress, answer, error, Ctrl-C), `trace_printer` + `tool_call_format` (live `[Plan]` / `[Tool: …]` / `[Check] …`), `answer_printer` (answer, Sources, notes), `question_answerer` (the port the CLI needs). |
 | `src/agent.py` | `ResearchAgent.answer(question) -> AgentResult`: planner, the tool-use loop, and the evidence check with its one retry. |
 | `src/agent_factory.py` | Composition root: `build_agent(settings, force_rebuild, observer)`, `build_tool_registry(index, web_client)`. |
 | `src/tools/` | `registry` (`Tool`, `ToolOutput`, `ToolRegistry`), `search_filing`, `get_passage`, `tavily_search` (`web_search`), `calculator` + `arithmetic` (`calculate`), `argument_errors`, `passage_json`. |
@@ -569,23 +608,34 @@ check failed).
 
 ### CLI
 
-`python src/main.py [--query QUESTION] [--quiet] [--rebuild-index]`
+`finassist [QUESTION | NUMBER] [--query QUESTION] [--quiet] [--rebuild-index]`
 
-| Flag | Effect |
+`finassist` is a console script (`[project.scripts]` in `pyproject.toml`, `main:main`) installed
+by `pip install -e .`; `python src/main.py` takes the same arguments. Relative paths (`.env`,
+`FILING_PATH`, `INDEX_DIR`, `prompts/`) resolve against the project root, so the command works
+from any directory.
+
+| Argument / flag | Effect |
 |---|---|
-| *(none)* | Interactive prompt `> `; `exit` / `quit` (any case), Ctrl-D or Ctrl-C at the prompt leaves. |
-| `--query QUESTION` | Answer once and exit. An empty question is a usage error. |
-| `--quiet` | No progress line, plan, trace or `[Check]` lines. stdout: only answers and Sources. Prompt, notes and errors: stderr. |
+| *(none)* | Interactive mode: title, numbered suggested questions, prompt `> `. At the prompt: a number runs that suggestion (echoed as `Question: …`); an out-of-range number gets one line, and the list is not re-printed; `help` / `?` lists the suggestions again; `exit` / `quit` (any case), Ctrl-D or Ctrl-C leaves; anything else is the question. |
+| `QUESTION` | Answer once and exit. An empty question is a usage error. |
+| `NUMBER` | Run that suggested question once (echoed as `Question: …`) and exit. A number with no suggestion is a usage error. |
+| `--query QUESTION` | Alias of `QUESTION`, kept for existing scripts; a number works the same way. Giving both is a usage error. |
+| `--quiet` | No progress line, plan, trace or `[Check]` lines. stdout: only answers and Sources. Menu, prompt, echo, notes and errors: stderr. |
 | `--rebuild-index` | Rebuild the Filing index before starting, even if it is current. |
+
+The suggestions come from [`prompts/suggested_questions.txt`](prompts/suggested_questions.txt);
+`finassist --help` lists them with usage examples, and needs no API keys. A missing or empty suggestions
+file is a one-line configuration error (exit status 2).
 
 | Exit status | When |
 |---|---|
-| `0` | Answered (`--query`), or the interactive session was left normally. A failed or cancelled question in interactive mode returns to the prompt and does not change the status. |
-| `1` | The model API failed for a `--query` (after retries), or the Filing index cannot be opened or built. |
-| `2` | Invalid usage (argparse) or configuration (e.g. a missing API key, an invalid `LOG_LEVEL`). |
-| `130` | Ctrl-C during a `--query` or during start-up (index loading). |
+| `0` | Answered (single question), or the interactive session was left normally. A failed or cancelled question in interactive mode returns to the prompt and does not change the status. |
+| `1` | The model API failed for a single question (after retries), or the Filing index cannot be opened or built. |
+| `2` | Invalid usage (argparse, including an out-of-range suggestion number) or configuration (e.g. a missing API key, an invalid `LOG_LEVEL`). |
+| `130` | Ctrl-C during a single question or during start-up (index loading). |
 
-stdout carries the banner, trace, answers and Sources; errors (`Error: …`), `[Cancelled]` and
+stdout carries the menu, trace, answers and Sources; errors (`Error: …`), `[Cancelled]` and
 logs always go to stderr. Two notes can follow an answer: the tool-round limit was reached, or
 the answer hit the output limit.
 
@@ -632,7 +682,7 @@ Two tiers ([ADR-0004](docs/adr/0004-hybrid-test-tiers-and-ci.md)):
 
 | Tier | Where | Count | Runtime | Covers |
 |---|---|---|---|---|
-| Offline | `tests/offline/` | 181 | ~20–70 s locally (≈ 21 s of it embedding the Filing once per session); +~10 s the first time for the model download | parser (13), hybrid index and rebuild rules (8), `calculate` incl. attack cases (25), citations (5), `web_search` incl. key-leak check (17), Anthropic adapter error mapping (9), agent loop and evidence check over a scripted model (37), CLI (45), prompts and settings (10), the live switch (12) |
+| Offline | `tests/offline/` | 215 | ~20–70 s locally (≈ 21 s of it embedding the Filing once per session); +~10 s the first time for the model download | parser (13), hybrid index and rebuild rules (8), `calculate` incl. attack cases (25), citations (5), `web_search` incl. key-leak check (17), Anthropic adapter error mapping (9), agent loop and evidence check over a scripted model (37), CLI incl. menu, arguments and running from another directory (79), prompts and settings (10), the live switch (12) |
 | Live | `tests/test_queries.py` | 2 | ~40–55 s (one agent run per query) | the two required queries end to end against Anthropic and Tavily (see [the checks above](#how-to-run-the-test-queries)) |
 
 Fixtures in `tests/conftest.py` parse and embed the Filing once per session, caching the model
@@ -683,7 +733,9 @@ Minimum versions are pinned in [`requirements.txt`](requirements.txt).
 | `pytest` | Both test tiers | Standard; markers separate the `live` tier. |
 
 Development only (not in `requirements.txt`): `ruff` for linting (configured in
-`pyproject.toml`).
+`pyproject.toml`). `pip install -e .` builds the `finassist` command with
+`setuptools` (the `[build-system]` in `pyproject.toml`; pip fetches it), taking the dependency
+list from `requirements.txt`.
 
 ---
 
@@ -783,16 +835,17 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
 ├── CLAUDE.md                 rules for AI coding agents (branches, worktrees, PRs)
 ├── CONTEXT.md                domain glossary
 ├── requirements.txt          minimum-pinned dependencies (Python 3.12)
-├── pyproject.toml            ruff + pytest configuration
+├── pyproject.toml            the finassist command (packaging) + ruff + pytest configuration
 ├── .env.example              every setting, documented
 ├── data/apple_10k_2025.htm   the Filing (FY2025, accession 0000320193-25-000079)
 ├── prompts/                  system_prompt, planner_prompt, tool_descriptions, round_limit,
-│                             evidence_check_prompt, evidence_retry (.txt)
+│                             evidence_check_prompt, evidence_retry, suggested_questions (.txt)
 ├── src/
 │   ├── main.py               entry point
 │   ├── agent.py              ResearchAgent: planner + tool-use loop + evidence check
 │   ├── agent_factory.py      composition root: build_agent, build_tool_registry
-│   ├── cli/                  options, REPL, question session, trace and answer printers
+│   ├── cli/                  options, menu of suggested questions, REPL, question session,
+│   │                         trace and answer printers
 │   ├── tools/                Tool protocol + registry; search_filing, get_passage, web_search, calculate
 │   └── utils/                config, prompts, logging; Filing parser; chunker + hybrid index;
 │                             ports and adapters (Anthropic, Tavily, Chroma, fastembed);
@@ -801,7 +854,7 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
 │   ├── conftest.py           session fixtures (parsed Filing, built index), RUN_LIVE_TESTS gate
 │   ├── live_switch.py        the RUN_LIVE_TESTS switch and key checks
 │   ├── fakes/                in-memory port fakes
-│   ├── offline/              offline tier (181 tests)
+│   ├── offline/              offline tier (215 tests)
 │   └── test_queries.py       live tier: the two required queries
 ├── docs/
 │   ├── TASKS.md              the assignment brief

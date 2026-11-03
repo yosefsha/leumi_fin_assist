@@ -1,7 +1,9 @@
-"""Command-line entry point: `python src/main.py [--query QUESTION] [--quiet] [--rebuild-index]`.
+"""Command-line entry point: `finassist [QUESTION | NUMBER] [--quiet] [--rebuild-index]`.
 
-Parses the options, loads the settings, configures logging, builds the agent
-once and hands over to `run_cli`, which answers one question or many.
+The `finassist` command (installed by `pip install -e .`) runs `main`; so does
+`python src/main.py`, with the same arguments. Parses the options, loads the
+settings, configures logging, builds the agent once and hands over to `run_cli`,
+which answers one question or many.
 """
 
 import contextlib
@@ -12,19 +14,33 @@ from collections.abc import Callable, Sequence
 from agent_factory import build_agent
 from cli.cli_app import EXIT_CONFIG_ERROR, EXIT_FAILURE, EXIT_INTERRUPTED, run_cli, trace_observer
 from cli.cli_options import parse_cli_args
+from cli.menu import Menu, welcome_title
+from cli.suggested_questions import (
+    NoSuggestedQuestionsError,
+    SuggestedQuestions,
+    load_suggested_questions,
+)
 from utils.config import ConfigError, Settings
 from utils.filing_index_factory import INDEX_LOAD_ERRORS
 from utils.logging_config import configure_logging
+from utils.prompts import PromptNotFoundError
 
 with contextlib.suppress(ImportError):  # line editing and history at the prompt, where available
     import readline  # noqa: F401
 
 
 def main(
-    argv: Sequence[str] | None = None, load_settings: Callable[[], Settings] = Settings.load
+    argv: Sequence[str] | None = None,
+    load_settings: Callable[[], Settings] = Settings.load,
+    load_suggestions: Callable[[], SuggestedQuestions] = load_suggested_questions,
 ) -> int:
     """Run the CLI and return its exit status."""
-    options = parse_cli_args(argv)
+    try:
+        suggestions = load_suggestions()
+    except (PromptNotFoundError, NoSuggestedQuestionsError) as error:
+        print(f"Error: cannot load the suggested questions: {error}", file=sys.stderr)
+        return EXIT_CONFIG_ERROR
+    options = parse_cli_args(suggestions, argv)
     try:
         settings = load_settings()
     except ConfigError as error:
@@ -39,9 +55,10 @@ def main(
     except KeyboardInterrupt:  # while the index loads, before the prompt is up
         print(file=sys.stderr)
         return EXIT_INTERRUPTED
-    status = run_cli(options, agent, input, sys.stdout, sys.stderr)
+    menu = Menu(welcome_title(settings.filing_fiscal_year), suggestions)
+    status = run_cli(options, agent, input, sys.stdout, sys.stderr, menu)
     if status == EXIT_INTERRUPTED:
-        # A cancelled --query may leave tool calls in flight on worker threads, which
+        # A cancelled single question may leave tool calls in flight on worker threads, which
         # the interpreter would wait for at exit; nothing is left to clean up, so go now.
         sys.stdout.flush()
         sys.stderr.flush()

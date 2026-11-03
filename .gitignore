@@ -6,3 +6,5 @@ cdk.out/
 .claude/worktrees/
 .env
 .index/
+*.egg-info/
+build/
