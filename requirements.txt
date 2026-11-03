@@ -7,5 +7,6 @@ lxml>=6.0.0
 fastembed>=0.9.0
 chromadb>=1.5.0
 rank-bm25>=0.2.2
+tokenizers>=0.22.0
 python-dotenv>=1.2.0
 pytest>=9.0.0
