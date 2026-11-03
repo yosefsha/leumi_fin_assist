@@ -118,9 +118,10 @@ jobs:
               model text.
             - P-2: The `calculate` tool never uses `eval`, `exec`, or any other
               dynamic code execution on model-supplied input.
-            - P-3: Every Index Entry fits the embedding model's 512-token input;
-              the index build raises on an oversized entry rather than letting it
-              be silently truncated (ADR-0002).
+            - P-3: Index Entries target at most 350 tokens (CONTEXT.md); 512
+              model tokens is the hard limit, and the index build must raise on
+              an entry above it rather than let it be silently truncated
+              (ADR-0002). Only an entry that can exceed 512 is a finding.
             - P-4: Prompts are loaded from files under `prompts/`, not hardcoded
               as string literals in code.
             - P-5: An ADR under `docs/adr/` that the change contradicts — flag it
