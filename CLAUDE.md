@@ -2,15 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Stack decision: a Python CLI agent in the `docs/TASKS.md` layout, no CI workflow — see `docs/adr/0001-cli-agent-assignment-layout-no-ci.md`.
+
 ## Coding Instructions
 
-Shared coding standards — design principles (SOLID, extensibility, industry conventions), repository layout, GitHub setup, and the React/TypeScript frontend.
+Shared coding standards — design principles (SOLID, extensibility, industry conventions).
 
 @docs/coding-instructions.md
 
-## Backend — Python / FastAPI
+## Python
 
-Backend standards for the Python stack — project structure, code style, configuration, testing, and the container runtime.
+Python standards — code style, the Protocol rule for data sources, testing scope, and dependencies.
 
 @docs/backend-python-instructions.md
 
