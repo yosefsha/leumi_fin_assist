@@ -45,10 +45,10 @@ first, and update it after each merge. Snapshot as of 2026-11-03:
 | Milestone | Issues | State |
 |---|---|---|
 | M1 — Foundation | #1 docs/ADRs, #2 scaffold + config + tool registry + Filing | ✅ merged |
-| M2 — Document QA | #3 filing parser → #4 chunker + hybrid index → #5 `search_filing` / `get_passage` | #3 merged; #4 in review; #5 chained behind it |
-| M3 — Web search & calc | #6 Tavily `web_search`, #7 `calculate` | ready to start |
-| M4 — Agent & CLI | #8 citation registry, #9 planner + executor, #10 CLI | #8 ready; #9 needs #5–#8; #10 needs #9 |
-| M5 — Delivery | #11 live test queries, #12 user README | needs #10, then #11 |
+| M2 — Document QA | #3 filing parser → #4 chunker + hybrid index → #5 `search_filing` / `get_passage` | #3, #4 merged; #5 in progress |
+| M3 — Web search & calc | #6 Tavily `web_search`, #7 `calculate` | ✅ merged |
+| M4 — Agent & CLI | #8 citation registry, #9 planner + executor, #10 CLI | #8 merged; #9 needs #5; #10 needs #9 |
+| M5 — Delivery | #21 offline test tier + CI, #11 live test queries, #12 user README | #21 in review; #11 needs #10; #12 last |
 
 Critical path: **#3 → #4 → #5 → #9 → #10 → #11 → #12**. Issues #6, #7 and #8 can run in
 parallel with M2.
@@ -93,7 +93,8 @@ IDs are checked against the citation registry, so the model can't invent a sourc
 
 | Decision | Where |
 |---|---|
-| Python CLI in the assignment's folder layout; no CI workflow because tests hit paid live APIs | [ADR-0001](docs/adr/0001-cli-agent-assignment-layout-no-ci.md) |
+| Python CLI in the assignment's folder layout | [ADR-0001](docs/adr/0001-cli-agent-assignment-layout-no-ci.md) |
+| Two test tiers: offline tests + ruff in CI on every PR; live query tests only when `RUN_LIVE_TESTS=true` (default off) | [ADR-0004](docs/adr/0004-hybrid-test-tiers-and-ci.md) |
 | Local embeddings (fastembed `bge-small-en-v1.5`) + BM25 hybrid retrieval over Passages; the index build fails if an entry exceeds 512 tokens instead of truncating it silently | [ADR-0002](docs/adr/0002-local-embeddings-and-passage-retrieval.md) |
 | No XBRL fact-lookup tool: figures come from rendered tables, arithmetic goes through `calculate` | [ADR-0003](docs/adr/0003-no-xbrl-fact-tool.md) |
 | Anthropic SDK with a hand-written agent loop, no framework (LangChain etc.) | issue #9 |
@@ -121,7 +122,7 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 │   └── apple_10k_2025.htm         ✅ the Filing (FY2025, accession 0000320193-25-000079, filed 2025-10-31)
 ├── docs/
 │   ├── TASKS.md                   ✅ the assignment brief (source of truth for scope and testing)
-│   ├── adr/                       ✅ architecture decision records 0001–0003
+│   ├── adr/                       ✅ architecture decision records 0001–0004
 │   ├── coding-instructions.md     ✅ design principles (SOLID, fail loudly, ports for external sources)
 │   └── backend-python-instructions.md ✅ Python style rules
 ├── src/
@@ -130,8 +131,9 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 │   ├── tools/
 │   │   ├── registry.py            ✅ `Tool` protocol, `ToolOutput`, `ToolRegistry`
 │   │   ├── document_qa.py         #5  search_filing, get_passage
-│   │   ├── tavily_search.py       #6  web_search (behind a `WebSearchClient` protocol)
-│   │   └── calculator.py          #7  calculate
+│   │   ├── tavily_search.py       ✅ `WebSearchTool` (web_search): one retry on timeout, failures as error results
+│   │   ├── calculator.py          ✅ `CalculateTool` (calculate)
+│   │   └── arithmetic.py          ✅ `ast` allow-list evaluator behind `calculate` (no `eval`/`exec`)
 │   └── utils/
 │       ├── config.py              ✅ `Settings`: .env + environment, validated, secrets kept out of repr/logs
 │       ├── prompts.py             ✅ `load_prompt(name)` reads prompts/<name>.txt
@@ -154,13 +156,23 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 │       ├── filing_index.py        ✅ `FilingIndex.search(query, limit, item)` → `PassageHit`s (one per Passage)
 │       ├── filing_index_loader.py ✅ reuse the stored index or rebuild (content hash, `force_rebuild`, 512-token guard)
 │       ├── filing_index_factory.py ✅ `open_filing_index(settings, force_rebuild)`: wires the concrete adapters
-│       └── citations.py           #8  CitationRegistry + Sources rendering
+│       ├── web_search.py          ✅ `WebSearchClient` protocol, `WebSearchResult`, `WebSearchError`
+│       ├── tavily_web_search_client.py ✅ Tavily implementation of `WebSearchClient`
+│       ├── web_result.py          ✅ `WebResult`: a web page as the citation layer sees it
+│       ├── citations.py           ✅ `CitationRegistry`: code-assigned `F#`/`W#` IDs per query
+│       ├── citation_format.py     ✅ `CitationFormatter`: tool-result headers and Sources lines
+│       └── cited_answer.py        ✅ `CitationResolver`: drops unregistered markers, renumbers `[1]…`
 ├── prompts/                       #5–#9 system_prompt, planner_prompt, tool_descriptions (never hard-coded)
 ├── tests/
-│   ├── fakes/                     ✅ in-memory port fakes (`InMemoryIndexStore`)
-│   └── test_queries.py            #11 live end-to-end tests of the two queries
+│   ├── conftest.py                ✅ session fixtures (parsed Filing, built index) + the `RUN_LIVE_TESTS` gate
+│   ├── live_switch.py             ✅ `RUN_LIVE_TESTS` and API-key checks for `live` tests
+│   ├── fakes/                     ✅ in-memory port fakes (index store, embedders, web search client)
+│   ├── offline/                   ✅ offline tier: parser, index, calculate, citations, web_search, live switch
+│   └── test_queries.py            #11 live end-to-end tests of the two queries (`@pytest.mark.live`)
 ├── .github/workflows/
-│   └── claude-review.yml          ✅ automated Claude PR review (the only automated gate)
+│   ├── ci.yml                     ✅ ruff + offline tests on every PR and push to main (regression gate)
+│   ├── live-tests.yml             ✅ live tests: manual dispatch, or main pushes if repo variable `RUN_LIVE_TESTS=true`
+│   └── claude-review.yml          ✅ automated Claude PR review (review gate)
 ├── .claude/                       ✅ agent/skill definitions for Claude Code (`/implement-issue`, `/implement-milestone`)
 └── scripts/                       repo-template tooling, not part of the product (excluded from ruff)
 ```
@@ -186,6 +198,7 @@ uv venv --python 3.12 .venv            # the machine default may be 3.14; the pr
 uv pip install -r requirements.txt ruff
 cp .env.example .env                   # fill in ANTHROPIC_API_KEY and TAVILY_API_KEY
 ruff check .
+pytest -m "not live"                   # offline tier, no keys needed (see §6)
 ```
 
 | Variable | Required | Default | Purpose |
@@ -196,6 +209,7 @@ ruff check .
 | `FILING_PATH` | no | `data/apple_10k_2025.htm` | the Filing |
 | `INDEX_DIR` | no | `.index` | local retrieval index (git-ignored) |
 | `LOG_LEVEL` | no | `INFO` | standard logging level |
+| `RUN_LIVE_TESTS` | no | `false` | `true` runs the live query tests, which call the paid APIs |
 
 Real environment variables override `.env`, except blank ones. On the first run after #4, the
 embedding model is downloaded into `INDEX_DIR/models` and the index is built in
@@ -220,9 +234,14 @@ There is no runnable entry point yet. `python src/main.py` arrives with #10.
   blocker, not a pass. The workflow needs the `CLAUDE_CODE_OAUTH_TOKEN` repo secret.
 - **PRs are merged by a human only.** AI agents open PRs and handle review comments; they never
   merge.
-- **Testing scope comes from `docs/TASKS.md`:** only the live end-to-end tests in
-  `tests/test_queries.py` (#11), run with real keys. There is no offline unit-test tier and no
-  CI. Reviews asking for unit tests are answered by pointing to this scope.
+- **Two test tiers** ([ADR-0004](docs/adr/0004-hybrid-test-tiers-and-ci.md)). The offline
+  tier (`tests/offline/`, no keys) asserts each merged issue's acceptance criteria and each
+  tool's boundary failure paths. `ci.yml` runs it with `ruff check .` on every PR, and it must
+  pass before merge. Run it locally with `pytest -m "not live"` (under a minute once the
+  ~130 MB embedding model is in `.index/models`; the first run downloads it). The live tier
+  (`tests/test_queries.py`, #11) calls Anthropic and Tavily and runs only with
+  `RUN_LIVE_TESTS=true`; plain `pytest` skips it. Tests target acceptance criteria and tool
+  boundaries, not every public function.
 - **Code rules** (enforced in review): every external source (HTTP API, index store, LLM)
   sits behind a `typing.Protocol` named in domain terms, injected where the app is wired
   together. Frozen dataclasses for value objects, Pydantic at boundaries, one concern per file,
@@ -236,13 +255,10 @@ There is no runnable entry point yet. `python src/main.py` arrives with #10.
 
 These are undecided and recorded in issue #15:
 
-1. `docs/coding-instructions.md` requires a success-path and a failure-path test for every
-   public function. That conflicts with the TASKS.md testing scope (live tests only). Decide
-   whether to drop the clause or add a unit tier.
-2. The env-var "Configuration" guidance was removed from `docs/backend-python-instructions.md`
+1. The env-var "Configuration" guidance was removed from `docs/backend-python-instructions.md`
    in #13. Decide whether to restore it.
-3. `scripts/copy_repo.py` and `scripts/create_remote_project.py` (template tooling) still
-   reference a `ci.yml` that no longer exists.
+2. `scripts/copy_repo.py` and `scripts/create_remote_project.py` (template tooling) still
+   describe the template's NestJS `ci.yml`, not this repo's.
 
 Known risks to watch:
 

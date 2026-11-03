@@ -54,9 +54,7 @@ class Settings:
 
         A blank environment variable does not override a value set in `env_file`.
         """
-        file_values = {k: v for k, v in dotenv_values(env_file).items() if v and v.strip()}
-        env_values = {k: v for k, v in os.environ.items() if v.strip()}
-        return cls.from_mapping({**file_values, **env_values})
+        return cls.from_mapping(load_environment(env_file))
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str]) -> "Settings":
@@ -73,6 +71,16 @@ class Settings:
             index_dir=_project_path(_optional(values, "INDEX_DIR", DEFAULT_INDEX_DIR)),
             log_level=_log_level(_optional(values, "LOG_LEVEL", DEFAULT_LOG_LEVEL)),
         )
+
+
+def load_environment(env_file: Path = DEFAULT_ENV_FILE) -> dict[str, str]:
+    """Return the non-blank variables of `env_file` (if present) overlaid by the environment.
+
+    A blank environment variable does not override a value set in `env_file`.
+    """
+    file_values = {k: v for k, v in dotenv_values(env_file).items() if v and v.strip()}
+    env_values = {k: v for k, v in os.environ.items() if v.strip()}
+    return {**file_values, **env_values}
 
 
 def _required(values: Mapping[str, str], name: str) -> str:

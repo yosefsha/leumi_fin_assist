@@ -44,6 +44,6 @@ consumes the first.
 
 ## After implementing
 
-1. Run `pytest` and `ruff check .` from the repository root. There is no CI (ADR-0001), so a skipped or failing test is caught only here.
+1. Run `pytest -m "not live"` and `ruff check .` from the repository root; `ci.yml` runs the same on the PR (ADR-0004). Add or update offline tests in `tests/offline/` for the issue's acceptance criteria and the tool's boundary failure paths. Run the live tier (`RUN_LIVE_TESTS=true pytest -m live`) only when the change affects the agent's answers, since it spends API quota.
 2. Run the agent with `python src/main.py` and verify the change works on a real query.
 3. Report what was implemented and any decisions made.

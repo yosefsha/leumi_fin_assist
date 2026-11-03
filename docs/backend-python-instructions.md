@@ -19,7 +19,16 @@ injected where the application is wired together, plus an in-memory fake for
 tests. The full rule set lives in `.claude/agents/backend-engineer.md`.
 
 ## Testing
-Testing scope is defined by docs/TASKS.md.
+Two tiers (`docs/adr/0004-hybrid-test-tiers-and-ci.md`):
+- **Offline**: `tests/offline/`, one file per area. No API keys and no network beyond the
+  cached embedding-model download. Each test turns an acceptance criterion or a tool-boundary
+  failure path into an assertion. Shared fixtures (the parsed Filing, the built index) are
+  session-scoped in `tests/conftest.py`; ports are replaced by the in-memory fakes in
+  `tests/fakes/`, never by patching business logic. CI runs `pytest -m "not live"` on every PR.
+- **Live**: `tests/test_queries.py` (#11), marked `@pytest.mark.live`. Skipped unless
+  `RUN_LIVE_TESTS=true` (environment or `.env`); when it is on, a missing API key fails the
+  test. On GitHub, `live-tests.yml` runs them on manual dispatch, and on pushes to `main` only
+  when the `RUN_LIVE_TESTS` repository variable is `true`.
 
 ## Dependencies
 - Pin minimum versions in `requirements.txt` (e.g., `anthropic>=0.40.0`).
