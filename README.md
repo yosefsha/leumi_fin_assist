@@ -232,7 +232,7 @@ skipping it. See [ADR-0004](docs/adr/0004-hybrid-test-tiers-and-ci.md).
 ```bash
 pip install ruff            # the linter is a development tool, not in requirements.txt
 ruff check .
-pytest -m "not live"        # 210 tests, about 20–70 s (most of it embedding the Filing once)
+pytest -m "not live"        # 215 tests, about 20–70 s (most of it embedding the Filing once)
 ```
 
 Plain `pytest` runs the offline tier and reports the two live tests as skipped.
@@ -625,7 +625,8 @@ from any directory.
 | `--rebuild-index` | Rebuild the Filing index before starting, even if it is current. |
 
 The suggestions come from [`prompts/suggested_questions.txt`](prompts/suggested_questions.txt);
-`finassist --help` lists them with usage examples, and needs no API keys.
+`finassist --help` lists them with usage examples, and needs no API keys. A missing or empty suggestions
+file is a one-line configuration error (exit status 2).
 
 | Exit status | When |
 |---|---|
@@ -681,7 +682,7 @@ Two tiers ([ADR-0004](docs/adr/0004-hybrid-test-tiers-and-ci.md)):
 
 | Tier | Where | Count | Runtime | Covers |
 |---|---|---|---|---|
-| Offline | `tests/offline/` | 210 | ~20–70 s locally (≈ 21 s of it embedding the Filing once per session); +~10 s the first time for the model download | parser (13), hybrid index and rebuild rules (8), `calculate` incl. attack cases (25), citations (5), `web_search` incl. key-leak check (17), Anthropic adapter error mapping (9), agent loop and evidence check over a scripted model (37), CLI incl. menu, arguments and running from another directory (74), prompts and settings (10), the live switch (12) |
+| Offline | `tests/offline/` | 215 | ~20–70 s locally (≈ 21 s of it embedding the Filing once per session); +~10 s the first time for the model download | parser (13), hybrid index and rebuild rules (8), `calculate` incl. attack cases (25), citations (5), `web_search` incl. key-leak check (17), Anthropic adapter error mapping (9), agent loop and evidence check over a scripted model (37), CLI incl. menu, arguments and running from another directory (79), prompts and settings (10), the live switch (12) |
 | Live | `tests/test_queries.py` | 2 | ~40–55 s (one agent run per query) | the two required queries end to end against Anthropic and Tavily (see [the checks above](#how-to-run-the-test-queries)) |
 
 Fixtures in `tests/conftest.py` parse and embed the Filing once per session, caching the model
@@ -853,7 +854,7 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
 │   ├── conftest.py           session fixtures (parsed Filing, built index), RUN_LIVE_TESTS gate
 │   ├── live_switch.py        the RUN_LIVE_TESTS switch and key checks
 │   ├── fakes/                in-memory port fakes
-│   ├── offline/              offline tier (210 tests)
+│   ├── offline/              offline tier (215 tests)
 │   └── test_queries.py       live tier: the two required queries
 ├── docs/
 │   ├── TASKS.md              the assignment brief

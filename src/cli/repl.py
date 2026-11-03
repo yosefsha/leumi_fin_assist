@@ -5,7 +5,7 @@ from typing import TextIO
 
 from cli.menu import Menu
 from cli.question_session import QuestionSession
-from cli.suggested_questions import suggestion_number
+from cli.suggested_questions import is_number_choice
 
 PROMPT = "> "
 EXIT_COMMANDS = frozenset({"exit", "quit"})
@@ -60,13 +60,12 @@ class Repl:
 
     def _question_for(self, line: str) -> str | None:
         """The question `line` asks: itself, or the suggestion it numbers (echoed first)."""
-        number = suggestion_number(line)
-        if number is None:
+        if not is_number_choice(line):
             return line
         suggestions = self._menu.suggestions
-        question = suggestions.get(number)
+        question = suggestions.pick(line)
         if question is None:
-            self._show(f"{suggestions.out_of_range(number)} Type 'help' to see the list.")
+            self._show(f"{suggestions.out_of_range(line)} Type 'help' to see the list.")
         else:
             self._show(f"{QUESTION_LABEL}{question}")
         return question

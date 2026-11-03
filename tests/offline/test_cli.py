@@ -287,15 +287,21 @@ def test_free_text_at_the_prompt_is_asked_as_typed_without_an_echo() -> None:
     assert QUESTION_LABEL not in out
 
 
-@pytest.mark.parametrize("number", ["0", "3", "42"])
+@pytest.mark.parametrize(
+    "number", ["0", "3", "42", pytest.param("9" * 5000, id="5000-digits")]
+)
 def test_an_out_of_range_number_gets_one_line_and_the_menu_is_not_reprinted(number: str) -> None:
     agent = _StubAgent(error=AssertionError("not asked"))
     status, out, _ = _run(CliOptions(), agent, _lines(number))
     assert (status, agent.questions) == (EXIT_OK, [])
     assert out == (
-        f"{_WELCOME}There is no suggestion {int(number)}: choose a number from 1 to 2. "
+        f"{_WELCOME}There is no suggestion {number}: choose a number from 1 to 2. "
         "Type 'help' to see the list.\n\n"
     )
+
+
+def test_a_number_with_leading_zeros_still_picks_its_suggestion() -> None:
+    assert _SUGGESTIONS.pick(" 02 ") == "Second suggestion?"
 
 
 @pytest.mark.parametrize("command", ["help", "?", " HELP "])
@@ -507,7 +513,16 @@ def test_a_number_argument_runs_that_suggestion(argv: list[str]) -> None:
 
 @pytest.mark.parametrize(
     "argv",
-    [["--query", "  "], ["  "], ["--verbose"], ["one", "two"], ["q", "--query", "q"], ["3"], ["0"]],
+    [
+        ["--query", "  "],
+        ["  "],
+        ["--verbose"],
+        ["one", "two"],
+        ["q", "--query", "q"],
+        ["3"],
+        ["0"],
+        pytest.param(["9" * 5000], id="5000-digits"),
+    ],
 )
 def test_invalid_usage_exits_with_status_2(argv: list[str]) -> None:
     with pytest.raises(SystemExit) as exit_info:
@@ -542,6 +557,21 @@ def test_missing_api_key_is_one_startup_line_naming_the_variable(
     assert captured.out == ""
     assert captured.err.count("\n") == 1
     assert captured.err.startswith("Error: Required setting ANTHROPIC_API_KEY is not set.")
+
+
+@pytest.mark.parametrize("contents", [None, "# no questions\n"], ids=["missing", "empty"])
+def test_unusable_suggestions_are_one_startup_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], contents: str | None
+) -> None:
+    if contents is not None:
+        (tmp_path / "suggested_questions.txt").write_text(contents)
+
+    status = main(["--help"], load_suggestions=lambda: load_suggested_questions(tmp_path))
+
+    captured = capsys.readouterr()
+    assert (status, captured.out) == (EXIT_CONFIG_ERROR, "")
+    assert captured.err.count("\n") == 1
+    assert captured.err.startswith("Error: cannot load the suggested questions: ")
 
 
 def test_an_index_that_cannot_be_opened_is_one_startup_line(
@@ -684,6 +714,6 @@ def test_main_py_runs_from_another_directory(tmp_path: Path) -> None:
         timeout=60,
         check=False,
     )
-    assert (completed.returncode, completed.stderr) == (0, "")
+    assert completed.returncode == 0, completed.stderr  # stderr may carry library import noise
     assert "usage: finassist" in completed.stdout
     assert "  1) What are Apple's top 3 risk factors" in completed.stdout

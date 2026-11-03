@@ -36,15 +36,29 @@ class SuggestedQuestions:
         """`  1) question`, one line per question."""
         return [f"{indent}{n}) {question}" for n, question in enumerate(self.questions, 1)]
 
-    def out_of_range(self, number: int) -> str:
-        """The message for a number with no question."""
-        return f"There is no suggestion {number}: choose a number from 1 to {len(self.questions)}."
+    def pick(self, choice: str) -> str | None:
+        """The question a number choice (see `is_number_choice`) names, or None if none does.
+
+        A choice with more digits than the largest number is never converted, so an
+        arbitrarily long digit string cannot hit Python's int-conversion limit.
+        """
+        digits = choice.strip().lstrip("0") or "0"
+        if len(digits) > len(str(len(self.questions))):
+            return None
+        return self.get(int(digits))
+
+    def out_of_range(self, choice: str) -> str:
+        """The message for a number choice with no question."""
+        return (
+            f"There is no suggestion {choice.strip()}: "
+            f"choose a number from 1 to {len(self.questions)}."
+        )
 
 
-def suggestion_number(text: str) -> int | None:
-    """The number `text` picks when it is only digits (e.g. `"2"`), else None."""
+def is_number_choice(text: str) -> bool:
+    """Whether `text` is only digits (e.g. `"2"`), so it picks a suggestion by number."""
     stripped = text.strip()
-    return int(stripped) if stripped.isascii() and stripped.isdigit() else None
+    return stripped.isascii() and stripped.isdigit()
 
 
 def load_suggested_questions(prompts_dir: Path = PROMPTS_DIR) -> SuggestedQuestions:

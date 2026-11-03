@@ -5,7 +5,7 @@ import textwrap
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from cli.suggested_questions import SuggestedQuestions, suggestion_number
+from cli.suggested_questions import SuggestedQuestions, is_number_choice
 
 PROG = "finassist"
 HELP_WIDTH = 79
@@ -61,12 +61,11 @@ def parse_cli_args(
         parser.error("give the question once: as an argument or with --query, not both")
     query = namespace.question if namespace.question is not None else namespace.query
     options = CliOptions(quiet=namespace.quiet, rebuild_index=namespace.rebuild_index, query=query)
-    number = None if query is None else suggestion_number(query)
-    if number is None:
+    if query is None or not is_number_choice(query):
         return options
-    picked = suggestions.get(number)
+    picked = suggestions.pick(query)
     if picked is None:
-        parser.error(f"{suggestions.out_of_range(number)} See {PROG} --help for the list.")
+        parser.error(f"{suggestions.out_of_range(query)} See {PROG} --help for the list.")
     return CliOptions(
         quiet=options.quiet, rebuild_index=options.rebuild_index, query=picked, announce_query=True
     )
