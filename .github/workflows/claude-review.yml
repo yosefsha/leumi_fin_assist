@@ -3,8 +3,8 @@ name: Claude PR Review
 # Automated review on every pull request: a top-level findings comment plus
 # inline comments anchored to the lines they concern.
 #
-# This is the project's only automated gate: there is no ci.yml, because the
-# tests call live paid APIs and run locally (docs/adr/0001-cli-agent-assignment-layout-no-ci.md).
+# This is the review gate; ci.yml (ruff + offline tests) is the regression gate,
+# and both must pass before merge (docs/adr/0004-hybrid-test-tiers-and-ci.md).
 
 on:
   pull_request:
