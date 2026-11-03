@@ -233,3 +233,14 @@ The agent retried once with a different query, then answered the half it could, 
 2. **Period alignment in comparisons.** "Current" for Microsoft and "latest 10-K" for Apple are different periods. The agent flags it but doesn't align them (for example, by comparing Apple's latest quarter).
 3. **No token or cost figures** were captured for these runs.
 4. **Run-to-run variation.** Query 2 picked different Microsoft periods (FY2026 vs fiscal Q4 2026) and sources between runs. Only repeated runs, as in the planned evaluation suite, can measure this.
+
+## 2026-11-03: live test tier (#11)
+
+`RUN_LIVE_TESTS=true pytest -m live` (`tests/test_queries.py`) runs both queries through `build_agent` and checks structure and figures, not wording. Two suite runs during #11 (four agent runs), same model and Filing as above:
+
+| | Query 1 | Query 2 |
+|---|---|---|
+| Run 1 | ✅ passed, 14 s: same plan as above (`get_passage` Item 1A + risk-factor passage_ids, `search_filing` Item 8, `calculate`), 8.30%, three Item 1A Sources + Item 8 | ❌ failed one check, 38 s: one `web_search` returned no results (an error result) and the test then counted every tool error as a failure. The test now treats "No web results found" as an expected outcome. Every other check passed. Apple 46.9% |
+| Run 2 | ✅ passed, 14 s: identical trace and figures | ✅ passed, 27 s: Items 8, 7 and 1A searched, five web searches, Apple 46.9% |
+
+**Microsoft's company-wide gross margin was not found in either run** (weakness 1 above). Both answers gave Microsoft's fiscal Q1 2027 revenue and operating income, said that the only gross margin figure found was Microsoft Cloud's segment margin (about 66%), and declined to use it as the company-wide figure. That is the behaviour the #9 prompt fix asks for, but it means the comparison itself went unanswered. The live test does not assert a Microsoft figure, because web data drifts.
