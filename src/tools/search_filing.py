@@ -7,12 +7,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from tools.argument_errors import invalid_arguments_output
 from tools.passage_json import passage_to_json
 from tools.registry import ToolOutput
 from utils.embedder import EmbedderError
-from utils.filing_index import UnknownItemError
 from utils.filing_items import parse_item_label, short_item_label, sorted_items
-from utils.filing_search import FilingSearch
+from utils.filing_search import FilingSearch, UnknownItemError
 from utils.index_store import IndexStoreError
 from utils.prompts import load_tool_description
 
@@ -81,20 +81,9 @@ class SearchFilingTool:
         try:
             request = SearchFilingArgs.model_validate(args)
         except ValidationError as error:
-            problems = "; ".join(
-                f"{'.'.join(str(part) for part in issue['loc']) or 'arguments'}: {issue['msg']}"
-                for issue in error.errors()
-            )
-            return ToolOutput(
-                content=f"Invalid search_filing arguments: {problems}.", is_error=True
-            )
+            return invalid_arguments_output(TOOL_NAME, error)
 
-        item = None
-        if request.item is not None:
-            item = self._known_item(request.item)
-            if item is None:
-                return ToolOutput(content=self._unknown_item_message(request.item), is_error=True)
-
+        item = None if request.item is None else self._item_name(request.item)
         try:
             hits = self._search.search(request.query, limit=request.top_k, item=item)
         except UnknownItemError:
@@ -111,12 +100,17 @@ class SearchFilingTool:
         if not hits:
             scope = f"in {item}" if item else "in the Filing"
             result["message"] = f"No matching passages {scope} for {request.query!r}."
-        return ToolOutput(content=json.dumps(result, ensure_ascii=False, indent=2))
+        return ToolOutput(content=json.dumps(result, ensure_ascii=False))
 
-    def _known_item(self, raw: str) -> str | None:
-        """The Filing's name for the Item `raw` denotes (`"1a"` -> `"Item 1A"`), if it has one."""
-        candidate = (parse_item_label(raw) or raw).casefold()
-        return next((item for item in self._search.items if item.casefold() == candidate), None)
+    def _item_name(self, raw: str) -> str:
+        """The Filing's name for the Item `raw` denotes (`"1a"` -> `"Item 1A"`).
+
+        A name the Filing does not have is returned as normalised, for the search
+        to reject with `UnknownItemError`.
+        """
+        candidate = parse_item_label(raw) or raw
+        folded = candidate.casefold()
+        return next((item for item in self._search.items if item.casefold() == folded), candidate)
 
     def _unknown_item_message(self, raw: str) -> str:
         labels = (short_item_label(item) for item in sorted_items(self._search.items))

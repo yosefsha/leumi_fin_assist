@@ -4,6 +4,7 @@ from collections.abc import Mapping
 
 from utils.bm25_retriever import Bm25Retriever
 from utils.embedder import Embedder
+from utils.filing_search import UnknownItemError
 from utils.index_entry import IndexEntry
 from utils.index_store import IndexStore
 from utils.passage import Passage
@@ -12,14 +13,6 @@ from utils.rank_fusion import reciprocal_rank_fusion
 
 CANDIDATES_PER_RETRIEVER = 50
 """How many Index Entries each retriever contributes to fusion."""
-
-
-class UnknownItemError(ValueError):
-    """A search was filtered to an Item the Filing does not have."""
-
-    def __init__(self, item: str, known: frozenset[str]) -> None:
-        super().__init__(f"Unknown Item {item!r}; the Filing has: {', '.join(sorted(known))}.")
-        self.item = item
 
 
 class FilingIndex:

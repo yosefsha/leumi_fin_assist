@@ -40,6 +40,6 @@ Write query in the Filing's own wording ("research and development expense", "gr
 ## get_passage
 Fetch a Passage by cross-reference. Use it when a Passage points elsewhere ("see Note 5", "Part II, Item 7 under the heading ...") or to open an Item or a Note directly.
 
-reference accepts: "Note <n>" (the whole Note), "Item <id>" (the Item's opening Passage), "Part <I-IV>, Item <id>" (the Part must match the Item), or a passage_id from an earlier result, such as "item-8-021".
+reference accepts: "Note <n>" (the whole Note), "Item <id>" (the Item's opening Passage), "Part <I-IV>, Item <id>" (the Part must match the Item), or a passage_id from an earlier result, such as "item-8-021". A Note or Item may carry its title as the Filing writes it, e.g. "Note 5 – Property, Plant and Equipment".
 
-Returns passage (passage_id, section_path, page, page_approximate, kind, content) and related: an outline (passage_id, section_path, page, kind, title) of the Passages nested under it - a Note's tables, an Item's subsections or risk factors. A Note's text marks each of its tables as "_[Table: <caption>]_"; fetch the table's passage_id from related to read its figures. An unknown Note, Item or form is an error that lists what is accepted.
+Returns passage (passage_id, section_path, page, page_approximate, kind, content) and related: an outline (passage_id, kind, page, title) of the Passages nested under it - a Note's tables and sub-sections, an Item's subsections or risk factors. A Note's text marks each of its tables as "_[Table: <title>]_"; the related entry with that same title is the table, so fetch its passage_id to read the figures. An unknown Note, Item or form is an error that lists what is accepted.

@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from tools.argument_errors import invalid_arguments_output
 from tools.passage_json import passage_outline_json, passage_to_json
 from tools.registry import ToolOutput
 from utils.cross_reference_resolver import CrossReferenceResolver, UnknownReferenceError
@@ -60,11 +61,7 @@ class GetPassageTool:
         try:
             reference = GetPassageArgs.model_validate(args).reference
         except ValidationError as error:
-            problems = "; ".join(
-                f"{'.'.join(str(part) for part in issue['loc']) or 'arguments'}: {issue['msg']}"
-                for issue in error.errors()
-            )
-            return ToolOutput(content=f"Invalid get_passage arguments: {problems}.", is_error=True)
+            return invalid_arguments_output(TOOL_NAME, error)
 
         try:
             resolved = self._resolver.resolve(reference)
@@ -76,4 +73,4 @@ class GetPassageTool:
             "passage": passage_to_json(resolved.passage),
             "related": [passage_outline_json(passage) for passage in resolved.related],
         }
-        return ToolOutput(content=json.dumps(result, ensure_ascii=False, indent=2))
+        return ToolOutput(content=json.dumps(result, ensure_ascii=False))

@@ -4,9 +4,6 @@ from typing import Any
 
 from utils.passage import Passage, PassageKind
 
-OUTLINE_TITLE_LENGTH = 160
-"""Longest title shown for a Passage listed in an outline."""
-
 
 def passage_to_json(passage: Passage) -> dict[str, Any]:
     """The whole Passage: its ID, location and Markdown content."""
@@ -21,29 +18,30 @@ def passage_to_json(passage: Passage) -> dict[str, Any]:
 
 
 def passage_outline_json(passage: Passage) -> dict[str, Any]:
-    """A one-line listing of a Passage, without its content, to fetch it later by ID."""
+    """A one-line listing of a Passage, without its content, to fetch it later by ID.
+
+    A table's `title` is its caption, or its heading when it has none: the same
+    text as the `_[Table: …]_` marker that stands for it in the surrounding text.
+    Any other Passage's `title` is its Section Path below the Item.
+    """
     return {
         "passage_id": passage.passage_id,
-        "section_path": passage.section_path_text,
-        "page": passage.page,
         "kind": passage.kind.value,
-        "title": _title(passage),
+        "page": passage.page,
+        "title": _table_marker_text(passage)
+        if passage.kind is PassageKind.TABLE
+        else " > ".join(passage.section_path[1:]) or passage.section_path_text,
     }
 
 
-def _title(passage: Passage) -> str:
-    """A table's caption (or column headers), or any other Passage's heading, on one line."""
-    blocks = [block.strip() for block in passage.content.split("\n\n") if block.strip()]
-    if not blocks:
-        return passage.section_path[-1]
-    title = blocks[0].lstrip("#")
-    if passage.kind is PassageKind.TABLE and len(blocks) > 1:
-        caption = blocks[1]
-        if caption.startswith("|"):
-            headers = [cell.strip() for cell in caption.splitlines()[0].strip("|").split("|")]
-            caption = "Columns: " + ", ".join(cell for cell in headers if cell)
-        title = caption
-    title = " ".join(title.split())
-    if len(title) > OUTLINE_TITLE_LENGTH:
-        title = title[: OUTLINE_TITLE_LENGTH - 1].rstrip() + "…"
-    return title
+def _table_marker_text(passage: Passage) -> str:
+    """The text the parser writes in the table's `_[Table: …]_` marker: caption or heading.
+
+    A table Passage's content is `## <heading>`, then its caption paragraph if it
+    has one, then the Markdown table.
+    """
+    heading, _, rest = passage.content.partition("\n\n")
+    caption = rest.partition("\n\n")[0]
+    if caption and not caption.startswith("|"):
+        return caption
+    return heading.removeprefix("## ")

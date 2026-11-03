@@ -5,6 +5,14 @@ from typing import Protocol
 from utils.passage_hit import PassageHit
 
 
+class UnknownItemError(ValueError):
+    """A search was filtered to an Item the Filing does not have."""
+
+    def __init__(self, item: str, known: frozenset[str]) -> None:
+        super().__init__(f"Unknown Item {item!r}; the Filing has: {', '.join(sorted(known))}.")
+        self.item = item
+
+
 class FilingSearch(Protocol):
     """Searches the Filing for the Passages relevant to a query.
 
