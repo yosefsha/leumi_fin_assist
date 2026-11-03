@@ -50,6 +50,11 @@ class FilingIndex:
         return len(self._entries)
 
     @property
+    def passages(self) -> tuple[Passage, ...]:
+        """Every Passage of the Filing, in Filing order."""
+        return tuple(self._passages.values())
+
+    @property
     def items(self) -> frozenset[str]:
         """The Items a search can be filtered to, e.g. `Item 1A`."""
         return self._items

@@ -21,3 +21,25 @@ Use it for: current stock prices and market capitalisation, competitor figures (
 Write a specific query that names the company, the metric and the period, such as "Microsoft gross margin fiscal 2026 Q1". Returns up to 5 results, each with url, title, content (an excerpt) and published_date (null when the source gives none).
 
 Prefer primary sources - investor-relations pages, SEC filings and earnings releases - over aggregators and commentary. When you use a result, always state the period the figure covers (quarter or fiscal year) and cite its URL and published date. If the results do not state the period clearly, say so rather than guessing.
+
+## search_filing
+Search Apple's 10-K Filing and return the most relevant Passages, best first. Use it for anything the Filing itself reports: Apple's risk factors, business description, results of operations, and fiscal-year figures such as revenue, gross margin or R&D expense. Do not use it for current market data, competitors or events after the fiscal year - use web_search for those.
+
+Each Passage is a whole unit of the Filing (one subsection, one risk factor, one Note or one table) with passage_id, section_path, page, page_approximate, kind (section, risk_factor, note or table) and content in Markdown. Cite a Passage by its section_path and page.
+
+Scope the search with item whenever you know where the answer lives - it removes off-topic Passages from other parts of the Filing:
+- "1A" Risk Factors: principal risks and uncertainties (one Passage per risk factor).
+- "7" MD&A: management's explanation of results, gross margin and operating expense drivers, liquidity.
+- "8" Financial Statements and Notes: the reported figures (statements of operations, balance sheets, cash flows) and the Notes.
+- "1" Business: products, services, segments, competition, employees.
+- Also "1B", "1C", "2"-"6", "7A", "9"-"9C", "10"-"16" and "Front Matter".
+Pass item as the bare Item number, e.g. "1A" or "8". For a figure, search Item 8 for the statement and Item 7 for the explanation; omit item only when you do not know which Item holds the answer.
+
+Write query in the Filing's own wording ("research and development expense", "gross margin percentage", "principal risks"), not as a question. top_k is 1-10 (default 5); raise it when you need several risk factors or table rows. A search that finds nothing returns an empty passages list with a "No matching passages" message - try other wording or another item rather than guessing. An unknown item is an error that lists the valid items.
+
+## get_passage
+Fetch a Passage by cross-reference. Use it when a Passage points elsewhere ("see Note 5", "Part II, Item 7 under the heading ...") or to open an Item or a Note directly.
+
+reference accepts: "Note <n>" (the whole Note), "Item <id>" (the Item's opening Passage), "Part <I-IV>, Item <id>" (the Part must match the Item), or a passage_id from an earlier result, such as "item-8-021".
+
+Returns passage (passage_id, section_path, page, page_approximate, kind, content) and related: an outline (passage_id, section_path, page, kind, title) of the Passages nested under it - a Note's tables, an Item's subsections or risk factors. A Note's text marks each of its tables as "_[Table: <caption>]_"; fetch the table's passage_id from related to read its figures. An unknown Note, Item or form is an error that lists what is accepted.
