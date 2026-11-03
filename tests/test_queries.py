@@ -109,13 +109,13 @@ def test_query_1_risk_factors_and_rd_share(
     checks.expect(_called(result.trace, "calculate"), "calculate called")
 
     cited = _cited_items(result.answer.sources)
-    risk_sources = [
+    # A set: a risk factor whose Section Path appears twice still counts once.
+    risk_sources = {
         path for path in _cited_paths(result.answer.sources) if path in risk_factor_paths
-    ]
+    }
     checks.expect(
         len(risk_sources) >= RISK_FACTOR_COUNT,
-        f"at least {RISK_FACTOR_COUNT} distinct risk-factor Passages in Sources "
-        f"(got {len(risk_sources)})",
+        f"at least {RISK_FACTOR_COUNT} distinct risk factors in Sources (got {len(risk_sources)})",
     )
     checks.expect("Item 8" in cited, f"Sources cite Item 8 (cited: {cited})")
     _check_percentage(checks, result.answer.body, rd_share, "R&D share of total net sales")
