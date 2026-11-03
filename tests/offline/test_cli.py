@@ -39,7 +39,7 @@ from utils.chat_model import ChatModelError
 from utils.citation_format import CitationFormatter
 from utils.cited_answer import CitationResolver, CitedAnswer
 from utils.config import Settings
-from utils.logging_config import CHATTY_LIBRARIES, configure_logging
+from utils.logging_config import APP_LOGGERS, configure_logging
 from utils.passage import Passage, PassageKind
 from utils.plan import Plan
 from utils.tool_result_citer import ToolResultCiter
@@ -363,12 +363,12 @@ def test_missing_api_key_is_one_startup_line_naming_the_variable(
 def restore_logging() -> Iterator[None]:
     root = logging.getLogger()
     handlers, level = root.handlers[:], root.level
-    library_levels = {name: logging.getLogger(name).level for name in CHATTY_LIBRARIES}
+    app_levels = {name: logging.getLogger(name).level for name in APP_LOGGERS}
     yield
     root.handlers[:] = handlers
     root.setLevel(level)
-    for name, library_level in library_levels.items():
-        logging.getLogger(name).setLevel(library_level)
+    for name, app_level in app_levels.items():
+        logging.getLogger(name).setLevel(app_level)
 
 
 @pytest.mark.usefixtures("restore_logging")
@@ -378,5 +378,8 @@ def restore_logging() -> Iterator[None]:
 )
 def test_library_loggers_stay_quiet_unless_debugging(level: str, library_level: int) -> None:
     configure_logging(level)
-    assert logging.getLogger().level == logging.getLevelNamesMapping()[level]
-    assert {logging.getLogger(name).level for name in CHATTY_LIBRARIES} == {library_level}
+    app_level = logging.getLevelNamesMapping()[level]
+    assert logging.getLogger("httpx").getEffectiveLevel() == library_level
+    assert logging.getLogger("chromadb.api").getEffectiveLevel() == library_level
+    assert logging.getLogger("utils.filing_index_loader").getEffectiveLevel() == app_level
+    assert logging.getLogger("agent").getEffectiveLevel() == app_level

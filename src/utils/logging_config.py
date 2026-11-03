@@ -4,30 +4,20 @@ import logging
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
-# Third-party loggers that report every request or model load at INFO. They are
-# held at WARNING unless LOG_LEVEL is DEBUG, so the REPL's stderr stays readable.
-CHATTY_LIBRARIES = (
-    "anthropic",
-    "chromadb",
-    "fastembed",
-    "httpcore",
-    "httpx",
-    "huggingface_hub",
-    "urllib3",
-)
+# The top-level loggers of this application's own modules (imports are rooted at src/).
+APP_LOGGERS = ("agent", "agent_factory", "cli", "main", "tools", "utils")
 
 
 def configure_logging(level: str) -> None:
-    """Configure the root logger to write to stderr at `level` (e.g. "INFO").
+    """Log to stderr: this application's modules at `level` (e.g. "INFO"), libraries quieter.
 
+    Third-party libraries (the HTTP clients, Chroma, fastembed…) log every request
+    or model load at INFO, so they are held at WARNING unless `level` is DEBUG.
     Call once at startup, from the entry point. Replaces any handlers already
     installed so repeated calls do not duplicate output.
     """
-    logging.basicConfig(level=level, format=LOG_FORMAT, force=True)
-    library_level = (
-        logging.DEBUG
-        if level == "DEBUG"
-        else max(logging.WARNING, logging.getLevelNamesMapping()[level])
-    )
-    for name in CHATTY_LIBRARIES:
-        logging.getLogger(name).setLevel(library_level)
+    app_level = logging.getLevelNamesMapping()[level]
+    library_level = app_level if app_level <= logging.DEBUG else max(app_level, logging.WARNING)
+    logging.basicConfig(level=library_level, format=LOG_FORMAT, force=True)
+    for name in APP_LOGGERS:
+        logging.getLogger(name).setLevel(app_level)
