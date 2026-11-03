@@ -45,7 +45,7 @@ first, and update it after each merge. Snapshot as of 2026-11-03:
 | Milestone | Issues | State |
 |---|---|---|
 | M1 — Foundation | #1 docs/ADRs, #2 scaffold + config + tool registry + Filing | ✅ merged |
-| M2 — Document QA | #3 filing parser → #4 chunker + hybrid index → #5 `search_filing` / `get_passage` | #3 in review; #4, #5 chained behind it |
+| M2 — Document QA | #3 filing parser → #4 chunker + hybrid index → #5 `search_filing` / `get_passage` | #3 merged; #4 in review; #5 chained behind it |
 | M3 — Web search & calc | #6 Tavily `web_search`, #7 `calculate` | ready to start |
 | M4 — Agent & CLI | #8 citation registry, #9 planner + executor, #10 CLI | #8 ready; #9 needs #5–#8; #10 needs #9 |
 | M5 — Delivery | #11 live test queries, #12 user README | needs #10, then #11 |
@@ -141,11 +141,23 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 │       ├── filing_layout.py       ✅ HTML → ordered text/table/anchor blocks with page numbers
 │       ├── table_renderer.py      ✅ `<table>` → Markdown (merges `$`/`%` cells, drops spacer columns)
 │       ├── html_text.py           ✅ visible text and bold/italic emphasis of inline-styled elements
-│       ├── chunker.py             #4  Passages → Index Entries / Table Cards
-│       ├── index_store.py         #4  Chroma + BM25, RRF, content-hash rebuild
+│       ├── chunker.py             ✅ `Chunker`: Passages → Index Entries (≤350-token excerpts, never across a heading)
+│       ├── text_packer.py         ✅ packs whole paragraphs into a token budget, splitting oversized ones
+│       ├── table_card_builder.py  ✅ table Passage → Table Cards (caption, column headers, row labels)
+│       ├── index_entry.py         ✅ `IndexEntry` value object
+│       ├── embedder.py            ✅ `Embedder` protocol (+ `token_counter.py`: `TokenCounter` protocol)
+│       ├── fastembed_embedder.py  ✅ fastembed `bge-small-en-v1.5` (ONNX); untruncated token counts
+│       ├── index_store.py         ✅ `IndexStore` protocol + `IndexStoreError`
+│       ├── chroma_index_store.py  ✅ persistent Chroma collection at `INDEX_DIR/chroma`
+│       ├── bm25_retriever.py      ✅ BM25 (`rank_bm25`) over the same entries
+│       ├── rank_fusion.py         ✅ Reciprocal Rank Fusion
+│       ├── filing_index.py        ✅ `FilingIndex.search(query, limit, item)` → `PassageHit`s (one per Passage)
+│       ├── filing_index_loader.py ✅ reuse the stored index or rebuild (content hash, `force_rebuild`, 512-token guard)
+│       ├── filing_index_factory.py ✅ `open_filing_index(settings, force_rebuild)`: wires the concrete adapters
 │       └── citations.py           #8  CitationRegistry + Sources rendering
 ├── prompts/                       #5–#9 system_prompt, planner_prompt, tool_descriptions (never hard-coded)
 ├── tests/
+│   ├── fakes/                     ✅ in-memory port fakes (`InMemoryIndexStore`)
 │   └── test_queries.py            #11 live end-to-end tests of the two queries
 ├── .github/workflows/
 │   └── claude-review.yml          ✅ automated Claude PR review (the only automated gate)
@@ -186,8 +198,8 @@ ruff check .
 | `LOG_LEVEL` | no | `INFO` | standard logging level |
 
 Real environment variables override `.env`, except blank ones. On the first run after #4, the
-embedding model (~130 MB) is downloaded and the index is built. Later runs reuse the index
-unless the Filing changes.
+embedding model is downloaded into `INDEX_DIR/models` and the index is built in
+`INDEX_DIR/chroma`. Later runs reuse the index unless the Filing changes.
 
 There is no runnable entry point yet. `python src/main.py` arrives with #10.
 
