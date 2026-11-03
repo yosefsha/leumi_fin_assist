@@ -112,8 +112,14 @@ class ResearchAgent:
         trace: list[ToolCallRecord],
     ) -> list[ToolResultBlockParam]:
         """Run `calls` concurrently; cite and record them in call order; return the results."""
-        with ThreadPoolExecutor(max_workers=len(calls)) as pool:
+        pool = ThreadPoolExecutor(max_workers=len(calls))
+        try:
             outputs = list(pool.map(self._dispatch, calls))
+        except BaseException:
+            # Interrupted (Ctrl-C): return now rather than wait for calls still in flight.
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        pool.shutdown()
 
         results: list[ToolResultBlockParam] = []
         for call, output in zip(calls, outputs, strict=True):
@@ -122,7 +128,8 @@ class ResearchAgent:
                 round=round_number,
                 name=call.name,
                 args=dict(call.input) if isinstance(call.input, dict) else {},
-                error=output.content if output.is_error else None,
+                output=output.content,
+                is_error=output.is_error,
                 citation_ids=cited.citation_ids,
             )
             if output.is_error:

@@ -12,19 +12,21 @@ from utils.plan import Plan
 class ToolCallRecord:
     """One tool call the executor ran, in the order the model asked for it.
 
-    `error` is the error result's text when the call failed, else `None`.
-    `citation_ids` are the IDs the call's sources were registered under.
+    `output` is the tool's result text as the tool returned it (before its sources
+    were cited), or the error text when `is_error`. `citation_ids` are the IDs the
+    call's sources were registered under.
     """
 
     round: int
     name: str
     args: Mapping[str, Any] = field(hash=False)
-    error: str | None = None
+    output: str
+    is_error: bool = False
     citation_ids: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
-        return self.error is None
+        return not self.is_error
 
 
 @dataclass(frozen=True)

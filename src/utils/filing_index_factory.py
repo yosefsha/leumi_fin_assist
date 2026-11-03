@@ -3,12 +3,12 @@
 from utils.chroma_index_store import ChromaIndexStore
 from utils.chunker import ENTRY_TOKEN_BUDGET, Chunker
 from utils.config import Settings
-from utils.embedder import Embedder
+from utils.embedder import Embedder, EmbedderError
 from utils.fastembed_embedder import FastEmbedEmbedder
 from utils.filing_index import FilingIndex
-from utils.filing_index_loader import FilingIndexLoader
-from utils.filing_parser import FilingParser
-from utils.index_store import IndexStore
+from utils.filing_index_loader import FilingIndexLoader, IndexEntryTooLongError
+from utils.filing_parser import FilingParseError, FilingParser
+from utils.index_store import IndexStore, IndexStoreError
 from utils.table_card_builder import TableCardBuilder
 from utils.text_packer import TextPacker
 from utils.token_counter import TokenCounter
@@ -16,12 +16,21 @@ from utils.token_counter import TokenCounter
 MODELS_SUBDIR = "models"
 STORE_SUBDIR = "chroma"
 
+# Everything `open_filing_index` raises when the index cannot be opened or built.
+INDEX_LOAD_ERRORS: tuple[type[Exception], ...] = (
+    FilingParseError,
+    IndexEntryTooLongError,
+    EmbedderError,
+    IndexStoreError,
+)
+
 
 def open_filing_index(settings: Settings, force_rebuild: bool = False) -> FilingIndex:
     """Load (building if needed) the hybrid index of `settings.filing_path` under `INDEX_DIR`.
 
     The embedding model is cached in `INDEX_DIR/models`, the Chroma store lives in
     `INDEX_DIR/chroma`. `force_rebuild` backs the CLI's `--rebuild-index`.
+    Raises one of `INDEX_LOAD_ERRORS` when the index cannot be opened or built.
     """
     embedder = FastEmbedEmbedder(cache_dir=settings.index_dir / MODELS_SUBDIR)
     loader = build_filing_index_loader(
