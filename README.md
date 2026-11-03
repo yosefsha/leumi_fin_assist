@@ -78,7 +78,7 @@ embedding model and the index.
    pip install -r requirements.txt
    ```
 
-   With [uv](https://docs.astral.sh/uv/) instead (useful when the system Python is not 3.12):
+   If `python3.12` is not found, [uv](https://docs.astral.sh/uv/) fetches a 3.12 interpreter for you:
 
    ```bash
    uv venv --python 3.12 .venv
@@ -115,8 +115,9 @@ embedding model and the index.
    laptop CPU). Later runs reuse both and skip the build, unless the Filing, the embedding model
    or the index format changes.
 
-   If the model download stalls, disable Hugging Face's Xet transfer and retry; CI does the
-   same:
+   During the download, stderr shows Hugging Face progress bars and a warning about
+   unauthenticated requests (`HF_TOKEN`); both are harmless. If the download stalls, disable
+   Hugging Face's Xet transfer and retry; CI does the same:
 
    ```bash
    HF_HUB_DISABLE_XET=1 python src/main.py
@@ -189,7 +190,7 @@ skipping it. See [ADR-0004](docs/adr/0004-hybrid-test-tiers-and-ci.md).
 ```bash
 pip install ruff            # the linter is a development tool, not in requirements.txt
 ruff check .
-pytest -m "not live"        # 160 tests, about 30–45 s (most of it embedding the Filing once)
+pytest -m "not live"        # 160 tests, about 20–45 s (most of it embedding the Filing once)
 ```
 
 Plain `pytest` runs the offline tier and reports the two live tests as skipped.
@@ -586,7 +587,7 @@ Two tiers ([ADR-0004](docs/adr/0004-hybrid-test-tiers-and-ci.md)):
 
 | Tier | Where | Count | Runtime | Covers |
 |---|---|---|---|---|
-| Offline | `tests/offline/` | 160 | ~30–45 s locally (≈ 21 s of it embedding the Filing once per session); +~10 s the first time for the model download | parser (13), hybrid index and rebuild rules (8), `calculate` incl. attack cases (25), citations (5), `web_search` incl. key-leak check (17), Anthropic adapter error mapping (9), agent loop over a scripted model (21), CLI (40), prompts and settings (10), the live switch (12) |
+| Offline | `tests/offline/` | 160 | ~20–45 s locally (≈ 21 s of it embedding the Filing once per session); +~10 s the first time for the model download | parser (13), hybrid index and rebuild rules (8), `calculate` incl. attack cases (25), citations (5), `web_search` incl. key-leak check (17), Anthropic adapter error mapping (9), agent loop over a scripted model (21), CLI (40), prompts and settings (10), the live switch (12) |
 | Live | `tests/test_queries.py` | 2 | ~40–55 s (one agent run per query) | the two required queries end to end against Anthropic and Tavily (see [the checks above](#how-to-run-the-test-queries)) |
 
 Fixtures in `tests/conftest.py` parse and embed the Filing once per session, caching the model
@@ -601,7 +602,9 @@ Measured on a developer laptop (CPU only); sources in brackets.
 | Operation | Time | Source |
 |---|---|---|
 | Index build: parse + chunk + embed 259 entries | ~21 s | PR #20, PR #22 |
-| Start-up with a reusable index | ~0.3 s | PR #20 |
+| Loading a reusable index (no re-embedding) | ~0.3 s | PR #20 |
+| CLI start-up to the `> ` prompt, index reused | ~1.4 s | fresh-clone check, PR for #12 |
+| First run in a fresh clone: model download (~6 s) + index build (~19 s) + Query 1 | 53 s | fresh-clone check, PR for #12 |
 | Query 1 end to end | 13–14 s (6 tool calls, 2 rounds) | `docs/query-run-results.md`, PR #27 |
 | Query 2 end to end | 25–38 s (~10 tool calls, 3–4 rounds) | `docs/query-run-results.md`, PR #27 |
 | Live suite (both queries) | 42 s | PR #27 |
