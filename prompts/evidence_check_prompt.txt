@@ -11,10 +11,12 @@ Judge the evidence, not the prose. For each fact the question needs, find the to
 - segment_not_company_wide: the question asks about a company as a whole but the evidence gives a segment, division, product-line or business-unit figure. A segment figure is never a company-wide figure, even when the company headlines it.
 - secondary_source: a figure comes only from an aggregator, data site or news article although the company itself reports it (earnings release, investor-relations page, 10-Q, 10-K, 8-K). Filing facts are primary.
 - undated_or_stale: the source does not state the period the figure covers, or the period is clearly older than the latest one the company has reported, when the question asks for a current or latest figure.
-- period_mismatch: the answer combines or compares figures from different periods without saying so, or a calculation mixes inputs from different periods.
+- period_mismatch: the answer compares figures from different periods without saying so, or a calculation mixes inputs from different periods. A comparison the question itself sets up across periods (a Filing figure against a current one) is not a gap when the answer states both periods.
 - other: any other reason the evidence does not support the answer the question needs.
 
-Report only gaps that more tool calls could plausibly close. Do not report wording, formatting or citation style, facts the question does not ask for, or the absence of a ranking the Filing does not make.
+Report only gaps that more tool calls could plausibly close. Do not report wording, formatting or citation style, facts the question does not ask for, or the absence of a ranking the Filing does not make. Facts the question asks to take from the Filing are answered by the Filing: do not ask for newer figures to replace them.
+
+Give one gap per fact: when a fact has several problems, report the one that matters most and cover the rest in its guidance. List the most important gap first, and no more than three. The assistant has only a few tool rounds left, so guidance should lead with the step most likely to close the gap.
 
 # Retry guidance
 

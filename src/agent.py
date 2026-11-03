@@ -13,7 +13,7 @@ from utils.agent_result import AgentResult, EvidenceCheck, ToolCallRecord
 from utils.chat_model import ChatModel, ChatModelError, ModelReply
 from utils.citations import CitationRegistry
 from utils.cited_answer import CitationResolver
-from utils.evidence_review import Gap
+from utils.evidence_review import EvidenceReview, Gap
 from utils.evidence_reviewer import EvidenceReviewer
 from utils.plan import Plan
 from utils.planner import Planner
@@ -109,23 +109,11 @@ class ResearchAgent:
             if not reply.tool_calls or not tools_allowed:
                 # A check that finds no gaps, or fails, ends the run, so every check
                 # so far sent the model back once: `len(checks)` counts the retries.
-                # A check that finds no gaps, or fails, ends the run, so every check
-                # so far sent the model back once: `len(checks)` counts the retries.
                 if tools_allowed and reply.text and len(checks) < MAX_EVIDENCE_RETRIES:
-                    check = self._reviewer.review(
-                        question,
-                        plan,
-                        evidence,
-                        reply.text,
-                        [tool["name"] for tool in definitions],
-                        today,
-                    )
-                    checks.append(check)
-                    self._observer.on_evidence_check(check)
-                    if check.review is not None and not check.review.sufficient:
-                        messages.append(
-                            {"role": "user", "content": _retry_request(check.review.gaps)}
-                        )
+                    review = self._check_draft(question, plan, evidence, reply.text, today, checks)
+                    if review is not None and not review.sufficient:
+                        retry = _retry_request(review.gaps, MAX_TOOL_ROUNDS - rounds)
+                        messages.append({"role": "user", "content": retry})
                         continue
                 return self._finish(
                     question, plan, trace, reply, registry, tuple(checks), not tools_allowed
@@ -138,6 +126,22 @@ class ResearchAgent:
                 logger.warning("Tool round limit (%d) reached; asking for an answer.", rounds)
                 content.append({"type": "text", "text": load_prompt(ROUND_LIMIT_PROMPT).strip()})
             messages.append({"role": "user", "content": content})
+
+    def _check_draft(
+        self,
+        question: str,
+        plan: Plan,
+        evidence: Sequence[ToolEvidence],
+        draft_answer: str,
+        today: date,
+        checks: list[EvidenceCheck],
+    ) -> EvidenceReview | None:
+        """Check `draft_answer`, record and report the check, and return its review."""
+        tool_names = [tool["name"] for tool in self._tools.definitions()]
+        check = self._reviewer.review(question, plan, evidence, draft_answer, tool_names, today)
+        checks.append(check)
+        self._observer.on_evidence_check(check)
+        return check.review
 
     def _run_round(
         self,
@@ -228,10 +232,12 @@ def _task(question: str, plan: Plan) -> str:
     return task
 
 
-def _retry_request(gaps: tuple[Gap, ...]) -> str:
+def _retry_request(gaps: tuple[Gap, ...], rounds_left: int) -> str:
     """The user turn that sends the evidence check's gaps and guidance back to the executor."""
     listed = "\n".join(
         f"{n}. {gap.requirement} ({gap.problem.value}). Next: {gap.retry_guidance}"
         for n, gap in enumerate(gaps, 1)
     )
-    return render_prompt(EVIDENCE_RETRY_PROMPT, {"gaps": listed}).strip()
+    return render_prompt(
+        EVIDENCE_RETRY_PROMPT, {"gaps": listed, "rounds_left": str(rounds_left)}
+    ).strip()

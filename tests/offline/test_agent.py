@@ -491,6 +491,7 @@ def test_gaps_go_back_to_the_model_and_tools_are_allowed_again() -> None:
         "1. Company-wide gross margin, latest quarter (segment_not_company_wide). Next: Search "
         "the latest earnings release for revenue and cost of revenue."
     ) in retry_turn["content"]
+    assert f"You have {MAX_TOOL_ROUNDS - 1} tool rounds left" in retry_turn["content"]
     assert [record.round for record in result.trace] == [1, 2]
     assert result.answer.body == "Company-wide margin [1]."
     [check] = result.evidence_checks
