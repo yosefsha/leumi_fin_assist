@@ -47,8 +47,8 @@ first, and update it after each merge. Snapshot as of 2026-11-03:
 | M1 — Foundation | #1 docs/ADRs, #2 scaffold + config + tool registry + Filing | ✅ merged |
 | M2 — Document QA | #3 filing parser → #4 chunker + hybrid index → #5 `search_filing` / `get_passage` | ✅ merged |
 | M3 — Web search & calc | #6 Tavily `web_search`, #7 `calculate` | ✅ merged |
-| M4 — Agent & CLI | #8 citation registry, #9 planner + executor, #10 CLI | #8, #9 merged; #10 in review |
-| M5 — Delivery | #21 offline test tier + CI, #11 live test queries, #12 user README | #21 merged; #11 needs #10; #12 last |
+| M4 — Agent & CLI | #8 citation registry, #9 planner + executor, #10 CLI | ✅ merged |
+| M5 — Delivery | #21 offline test tier + CI, #11 live test queries, #12 user README | #21 merged; #11 in review; #12 last |
 
 Critical path: **#3 → #4 → #5 → #9 → #10 → #11 → #12**. Issues #6, #7 and #8 can run in
 parallel with M2.
@@ -196,7 +196,7 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 │   ├── live_switch.py             ✅ `RUN_LIVE_TESTS` and API-key checks for `live` tests
 │   ├── fakes/                     ✅ in-memory port fakes (index store, embedders, web search client, scripted chat model)
 │   ├── offline/                   ✅ offline tier: parser, index, calculate, citations, web_search, agent loop, live switch
-│   └── test_queries.py            #11 live end-to-end tests of the two queries (`@pytest.mark.live`)
+│   └── test_queries.py            ✅ live end-to-end tests of the two queries (`@pytest.mark.live`)
 ├── .github/workflows/
 │   ├── ci.yml                     ✅ ruff + offline tests on every PR and push to main (regression gate)
 │   ├── live-tests.yml             ✅ live tests: manual dispatch, or main pushes if repo variable `RUN_LIVE_TESTS=true`
@@ -232,7 +232,13 @@ uv pip install -r requirements.txt ruff
 cp .env.example .env                   # fill in ANTHROPIC_API_KEY and TAVILY_API_KEY
 ruff check .
 pytest -m "not live"                   # offline tier, no keys needed (see §6)
+RUN_LIVE_TESTS=true pytest -m live -v  # the two required queries, live: needs both keys, costs tokens
 ```
+
+The live tier runs each required query once through `build_agent` (about a minute, two agent
+runs) and checks the tools used, the Items cited and the figures (R&D share, gross margin)
+against the parsed income statement. Add `-s` to print each run's plan, trace and answer;
+on failure they are in the assertion message anyway.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|

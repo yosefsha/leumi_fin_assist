@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 TOOL_NAME = "web_search"
 # Tavily rejects queries longer than 400 characters.
 MAX_QUERY_LENGTH = 400
+# Starts the error result for a search that found nothing: an outcome, not a fault.
+NO_RESULTS_PREFIX = "No web results found for "
 
 
 class WebSearchArgs(BaseModel):
@@ -74,7 +76,7 @@ class WebSearchTool:
             return ToolOutput(content=f"Web search failed: {error}", is_error=True)
 
         if not results:
-            return ToolOutput(content=f"No web results found for {query!r}.", is_error=True)
+            return ToolOutput(content=f"{NO_RESULTS_PREFIX}{query!r}.", is_error=True)
         return ToolOutput(
             content=json.dumps({"query": query, "results_found": len(results)}),
             sources=tuple(results),
