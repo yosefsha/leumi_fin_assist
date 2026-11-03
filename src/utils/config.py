@@ -50,9 +50,13 @@ class Settings:
 
     @classmethod
     def load(cls, env_file: Path = DEFAULT_ENV_FILE) -> "Settings":
-        """Load settings from `env_file` (if present) overlaid by the process environment."""
-        file_values = {k: v for k, v in dotenv_values(env_file).items() if v is not None}
-        return cls.from_mapping({**file_values, **os.environ})
+        """Load settings from `env_file` (if present) overlaid by the process environment.
+
+        A blank environment variable does not override a value set in `env_file`.
+        """
+        file_values = {k: v for k, v in dotenv_values(env_file).items() if v and v.strip()}
+        env_values = {k: v for k, v in os.environ.items() if v.strip()}
+        return cls.from_mapping({**file_values, **env_values})
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str]) -> "Settings":
