@@ -35,7 +35,7 @@ def _search_filing(record: ToolCallRecord) -> str:
 
 
 def _text_arg(name: str) -> CallFormatter:
-    """A tool described by one text argument, e.g. `web_search "Microsoft gross margin"`."""
+    """A tool described by one text argument, e.g. `web_search "<company> gross margin"`."""
     return lambda record: f"{record.name} {_quoted(record.args.get(name, ''))}"
 
 
