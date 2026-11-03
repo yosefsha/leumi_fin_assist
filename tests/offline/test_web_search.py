@@ -118,3 +118,24 @@ def test_the_api_key_never_reaches_logs_or_results(
     assert caplog.records, "the failure should have been logged"
     assert _FAKE_KEY not in caplog.text
     assert _FAKE_KEY not in output.content
+
+
+def test_tavily_results_become_web_results_and_urlless_ones_are_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = {
+        "results": [
+            {"url": " https://ex.com/a ", "title": "A", "content": "x", "published_date": ""},
+            {"url": "", "title": "No URL", "content": "y"},
+        ]
+    }
+
+    def post(*_args: object, **_kwargs: object) -> requests.Response:
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps(body).encode()
+        return response
+
+    monkeypatch.setattr(requests.Session, "post", post)
+    results = TavilyWebSearchClient(_FAKE_KEY).search("q")
+    assert results == [WebResult("https://ex.com/a", "A", "x", None)]

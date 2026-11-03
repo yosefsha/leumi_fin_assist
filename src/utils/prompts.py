@@ -1,6 +1,7 @@
 """Load agent prompts from text files under `prompts/`."""
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 from utils.config import PROJECT_ROOT
@@ -51,3 +52,28 @@ def load_tool_description(tool_name: str, prompts_dir: Path = PROMPTS_DIR) -> st
     raise ToolDescriptionNotFoundError(
         f"No description for tool {tool_name!r} in {prompts_dir / 'tool_descriptions.txt'}."
     )
+
+
+_PLACEHOLDER = re.compile(r"\{\{\s*([a-z0-9_]+)\s*\}\}")
+
+
+class PromptPlaceholderError(ValueError):
+    """A prompt's `{{placeholders}}` and the values supplied for it do not match."""
+
+
+def render_prompt(name: str, values: Mapping[str, str], prompts_dir: Path = PROMPTS_DIR) -> str:
+    """Return `load_prompt(name)` with each `{{key}}` replaced by `values[key]`.
+
+    Raises `PromptPlaceholderError` when the prompt uses a placeholder with no
+    value, or a value is supplied for a placeholder the prompt does not use, so a
+    renamed placeholder fails at the first call instead of reaching the model.
+    """
+    text = load_prompt(name, prompts_dir)
+    used = set(_PLACEHOLDER.findall(text))
+    missing = used - values.keys()
+    unused = values.keys() - used
+    if missing or unused:
+        raise PromptPlaceholderError(
+            f"Prompt {name!r}: no value for {sorted(missing)}; unused values {sorted(unused)}."
+        )
+    return _PLACEHOLDER.sub(lambda match: values[match.group(1)], text)
