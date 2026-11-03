@@ -42,7 +42,10 @@ TOTAL_NET_SALES = "Total net sales"
 RESEARCH_AND_DEVELOPMENT = "Research and development"
 GROSS_MARGIN = "Gross margin"
 
-_FILING_SOURCE = re.compile(r"^10-K FY\d{4} — (?P<item>Item \w+)\b")
+# `10-K FY<year> — <Section Path>, p. <n>` (see CitationFormatter.source_line).
+_FILING_SOURCE = re.compile(
+    r"^10-K FY\d{4} — (?P<path>(?P<item>Item \w+)\b.*?)(?:, p\. \d+(?: \(approx\.\))?)?$"
+)
 _WEB_SOURCE = re.compile(r"https?://")
 _PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|percent\b)")
 _NUMBER = re.compile(r"[\d,]+(?:\.\d+)?")
@@ -70,6 +73,14 @@ def income_statement(passages: tuple[Passage, ...]) -> Passage:
 
 
 @pytest.fixture(scope="session")
+def risk_factor_paths(passages: tuple[Passage, ...]) -> frozenset[str]:
+    """The Section Paths of Item 1A's individual risk factors, as Sources render them."""
+    return frozenset(
+        passage.section_path_text for passage in passages if passage.kind is PassageKind.RISK_FACTOR
+    )
+
+
+@pytest.fixture(scope="session")
 def reference_resolver(passages: tuple[Passage, ...]) -> CrossReferenceResolver:
     """Resolves the agent's `get_passage` references to the Passages it fetched."""
     return CrossReferenceResolver(passages)
@@ -79,6 +90,7 @@ def test_query_1_risk_factors_and_rd_share(
     agent: ResearchAgent,
     income_statement: Passage,
     reference_resolver: CrossReferenceResolver,
+    risk_factor_paths: frozenset[str],
 ) -> None:
     rd_share = _share(income_statement, RESEARCH_AND_DEVELOPMENT)
     result = agent.answer(QUERY_1)
@@ -97,11 +109,13 @@ def test_query_1_risk_factors_and_rd_share(
     checks.expect(_called(result.trace, "calculate"), "calculate called")
 
     cited = _cited_items(result.answer.sources)
-    risk_sources = sum(1 for item in cited if item == "Item 1A")
+    risk_sources = [
+        path for path in _cited_paths(result.answer.sources) if path in risk_factor_paths
+    ]
     checks.expect(
-        risk_sources >= RISK_FACTOR_COUNT,
-        f"at least {RISK_FACTOR_COUNT} distinct Item 1A Sources, one per risk factor "
-        f"(got {risk_sources})",
+        len(risk_sources) >= RISK_FACTOR_COUNT,
+        f"at least {RISK_FACTOR_COUNT} distinct risk-factor Passages in Sources "
+        f"(got {len(risk_sources)})",
     )
     checks.expect("Item 8" in cited, f"Sources cite Item 8 (cited: {cited})")
     _check_percentage(checks, result.answer.body, rd_share, "R&D share of total net sales")
@@ -218,6 +232,11 @@ def _items_fetched(trace: Iterable[ToolCallRecord], resolver: CrossReferenceReso
 def _cited_items(sources: Iterable[str]) -> list[str]:
     """The Item of each Filing source in the Sources list, in order (one per source)."""
     return [match["item"] for source in sources if (match := _FILING_SOURCE.match(source))]
+
+
+def _cited_paths(sources: Iterable[str]) -> list[str]:
+    """The Section Path of each Filing source in the Sources list, in order."""
+    return [match["path"] for source in sources if (match := _FILING_SOURCE.match(source))]
 
 
 def _describe(result: AgentResult) -> str:
