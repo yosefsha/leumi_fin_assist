@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from tools.argument_errors import invalid_arguments_output
 from tools.registry import ToolOutput
 from utils.prompts import load_tool_description
 from utils.web_search import WebSearchClient, WebSearchError, WebSearchResult, WebSearchTimeoutError
@@ -64,11 +65,7 @@ class WebSearchTool:
         try:
             query = WebSearchArgs.model_validate(args).query
         except ValidationError as error:
-            problems = "; ".join(
-                f"{'.'.join(str(part) for part in issue['loc']) or 'arguments'}: {issue['msg']}"
-                for issue in error.errors()
-            )
-            return ToolOutput(content=f"Invalid web_search arguments: {problems}.", is_error=True)
+            return invalid_arguments_output(TOOL_NAME, error)
 
         try:
             results = self._search_with_retry(query)
