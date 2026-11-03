@@ -3,7 +3,6 @@
 import json
 import logging
 from collections.abc import Mapping
-from dataclasses import asdict
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -11,7 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tools.argument_errors import invalid_arguments_output
 from tools.registry import ToolOutput
 from utils.prompts import load_tool_description
-from utils.web_search import WebSearchClient, WebSearchError, WebSearchResult, WebSearchTimeoutError
+from utils.web_result import WebResult
+from utils.web_search import WebSearchClient, WebSearchError, WebSearchTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class WebSearchTool:
         return self._input_schema
 
     def run(self, args: Mapping[str, Any]) -> ToolOutput:
-        """Search for `args["query"]` and return the results as JSON."""
+        """Search for `args["query"]`; the web results are the output's sources."""
         try:
             query = WebSearchArgs.model_validate(args).query
         except ValidationError as error:
@@ -75,23 +75,15 @@ class WebSearchTool:
 
         if not results:
             return ToolOutput(content=f"No web results found for {query!r}.", is_error=True)
-        return ToolOutput(content=_to_json(query, results))
+        return ToolOutput(
+            content=json.dumps({"query": query, "results_found": len(results)}),
+            sources=tuple(results),
+        )
 
-    def _search_with_retry(self, query: str) -> list[WebSearchResult]:
+    def _search_with_retry(self, query: str) -> list[WebResult]:
         """Run the search, retrying exactly once if the first attempt times out."""
         try:
             return self._client.search(query)
         except WebSearchTimeoutError as error:
             logger.info("web_search timed out for query %r (%s); retrying once.", query, error)
         return self._client.search(query)
-
-
-def _to_json(query: str, results: list[WebSearchResult]) -> str:
-    return json.dumps(
-        {
-            "query": query,
-            "results": [asdict(result) for result in results],
-        },
-        ensure_ascii=False,
-        indent=2,
-    )

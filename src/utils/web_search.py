@@ -4,22 +4,9 @@ Business logic depends on `WebSearchClient` only; a provider (Tavily) implements
 it in its own module and is injected where the agent is wired together.
 """
 
-from dataclasses import dataclass
 from typing import Protocol
 
-
-@dataclass(frozen=True)
-class WebSearchResult:
-    """One web page returned for a query: its URL, title, an excerpt and its date.
-
-    `published_date` is the date as the provider reports it, or `None` when the
-    source gives none.
-    """
-
-    url: str
-    title: str
-    content: str
-    published_date: str | None
+from utils.web_result import WebResult
 
 
 class WebSearchError(Exception):
@@ -33,7 +20,7 @@ class WebSearchTimeoutError(WebSearchError):
 class WebSearchClient(Protocol):
     """Searches the web for pages relevant to a query."""
 
-    def search(self, query: str) -> list[WebSearchResult]:
+    def search(self, query: str) -> list[WebResult]:
         """Return the most relevant pages for `query`, best first (possibly none).
 
         Raises `WebSearchTimeoutError` when the provider times out and

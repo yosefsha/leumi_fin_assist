@@ -1,11 +1,11 @@
-"""A web search result as the citation layer sees it."""
+"""A web search result: what a `WebSearchClient` returns and what a web Citation cites."""
 
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class WebResult:
-    """One web page returned by a search, citable by its URL.
+    """One web page returned by a search: its URL, title, an excerpt and its date.
 
     `published_date` is the date the source reports for the page, as the source
     wrote it, or `None` when the source gives none. A blank title or date is

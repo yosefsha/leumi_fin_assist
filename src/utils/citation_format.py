@@ -20,14 +20,25 @@ class CitationFormatter:
     def for_model(self, citation: Citation) -> str:
         """Render a registered source as a tool-result block, headed by its citation ID.
 
-        Filing: `[F1] <Section Path> — p. <n>` then the Passage content.
+        Filing: `[F1] <Section Path> — p. <n> (passage_id <id>, <kind>)` then the
+        Passage content; the `passage_id` lets the model open the Passage's
+        related Passages with `get_passage`.
         Web: `[W1] <title> — <url> (as of <date> | date unknown)` then the page content.
         """
         match citation:
+            case FilingCitation(passage=passage):
+                return f"{self.header_for_model(citation)}\n{passage.content}"
+            case WebCitation(result=result):
+                return f"{self.header_for_model(citation)}\n{result.content}"
+
+    def header_for_model(self, citation: Citation) -> str:
+        """The first line of `for_model`: the citation ID and where the source is."""
+        match citation:
             case FilingCitation(citation_id=cid, passage=passage):
-                return f"[{cid}] {_filing_locator(passage)}\n{passage.content}"
+                details = f"(passage_id {passage.passage_id}, {passage.kind.value})"
+                return f"[{cid}] {_filing_locator(passage)} {details}"
             case WebCitation(citation_id=cid, result=result):
-                return f"[{cid}] {_web_locator(result)}\n{result.content}"
+                return f"[{cid}] {_web_locator(result)}"
 
     def source_line(self, citation: Citation) -> str:
         """Render a registered source as one entry of the Sources list (without its number).

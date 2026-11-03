@@ -8,7 +8,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from tools.argument_errors import invalid_arguments_output
-from tools.passage_json import passage_to_json
 from tools.registry import ToolOutput
 from utils.embedder import EmbedderError
 from utils.filing_items import parse_item_label, short_item_label, sorted_items
@@ -55,6 +54,9 @@ class SearchFilingArgs(BaseModel):
 class SearchFilingTool:
     """Searches the Filing through an injected `FilingSearch` and returns whole Passages.
 
+    The Passages are the result's `sources`, best first; `content` says what was
+    searched and how many Passages were found.
+
     Invalid arguments, an Item the Filing lacks, and a retrieval failure are
     error results. A search that finds nothing is a normal result that says so.
     """
@@ -77,7 +79,7 @@ class SearchFilingTool:
         return self._input_schema
 
     def run(self, args: Mapping[str, Any]) -> ToolOutput:
-        """Search for `args["query"]`, within `args["item"]` if given; return Passages as JSON."""
+        """Search for `args["query"]`, within `args["item"]` if given; the Passages are sources."""
         try:
             request = SearchFilingArgs.model_validate(args)
         except ValidationError as error:
@@ -95,12 +97,15 @@ class SearchFilingTool:
         result: dict[str, Any] = {
             "query": request.query,
             "item": item,
-            "passages": [passage_to_json(hit.passage) for hit in hits],
+            "passages_found": len(hits),
         }
         if not hits:
             scope = f"in {item}" if item else "in the Filing"
             result["message"] = f"No matching passages {scope} for {request.query!r}."
-        return ToolOutput(content=json.dumps(result, ensure_ascii=False))
+        return ToolOutput(
+            content=json.dumps(result, ensure_ascii=False),
+            sources=tuple(hit.passage for hit in hits),
+        )
 
     def _item_name(self, raw: str) -> str:
         """The Filing's name for the Item `raw` denotes (`"1a"` -> `"Item 1A"`).

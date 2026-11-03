@@ -15,9 +15,10 @@ import requests
 from fakes.scripted_web_search_client import ScriptedWebSearchClient
 from tools.tavily_search import WebSearchTool
 from utils.tavily_web_search_client import TavilyWebSearchClient
-from utils.web_search import WebSearchError, WebSearchResult, WebSearchTimeoutError
+from utils.web_result import WebResult
+from utils.web_search import WebSearchError, WebSearchTimeoutError
 
-_RESULT = WebSearchResult(
+_RESULT = WebResult(
     url="https://www.microsoft.com/investor",
     title="Microsoft FY26 Q1 earnings",
     content="Gross margin was 69%.",
@@ -27,14 +28,12 @@ _QUERY = {"query": "Microsoft gross margin latest quarter"}
 _FAKE_KEY = "tvly-offline-test-key-0123456789"
 
 
-def test_results_are_returned_as_json() -> None:
+def test_results_are_returned_as_sources() -> None:
     client = ScriptedWebSearchClient([[_RESULT]])
     output = WebSearchTool(client).run(_QUERY)
     assert not output.is_error
-    body = json.loads(output.content)
-    assert body["query"] == _QUERY["query"]
-    assert body["results"][0]["url"] == _RESULT.url
-    assert body["results"][0]["published_date"] == "2025-10-29"
+    assert json.loads(output.content) == {"query": _QUERY["query"], "results_found": 1}
+    assert output.sources == (_RESULT,)
 
 
 def test_a_timeout_is_retried_exactly_once() -> None:
@@ -119,3 +118,24 @@ def test_the_api_key_never_reaches_logs_or_results(
     assert caplog.records, "the failure should have been logged"
     assert _FAKE_KEY not in caplog.text
     assert _FAKE_KEY not in output.content
+
+
+def test_tavily_results_become_web_results_and_urlless_ones_are_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = {
+        "results": [
+            {"url": " https://ex.com/a ", "title": "A", "content": "x", "published_date": ""},
+            {"url": "", "title": "No URL", "content": "y"},
+        ]
+    }
+
+    def post(*_args: object, **_kwargs: object) -> requests.Response:
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps(body).encode()
+        return response
+
+    monkeypatch.setattr(requests.Session, "post", post)
+    results = TavilyWebSearchClient(_FAKE_KEY).search("q")
+    assert results == [WebResult("https://ex.com/a", "A", "x", None)]

@@ -45,10 +45,10 @@ first, and update it after each merge. Snapshot as of 2026-11-03:
 | Milestone | Issues | State |
 |---|---|---|
 | M1 — Foundation | #1 docs/ADRs, #2 scaffold + config + tool registry + Filing | ✅ merged |
-| M2 — Document QA | #3 filing parser → #4 chunker + hybrid index → #5 `search_filing` / `get_passage` | #3, #4 merged; #5 in progress |
+| M2 — Document QA | #3 filing parser → #4 chunker + hybrid index → #5 `search_filing` / `get_passage` | ✅ merged |
 | M3 — Web search & calc | #6 Tavily `web_search`, #7 `calculate` | ✅ merged |
-| M4 — Agent & CLI | #8 citation registry, #9 planner + executor, #10 CLI | #8 merged; #9 needs #5; #10 needs #9 |
-| M5 — Delivery | #21 offline test tier + CI, #11 live test queries, #12 user README | #21 in review; #11 needs #10; #12 last |
+| M4 — Agent & CLI | #8 citation registry, #9 planner + executor, #10 CLI | #8 merged; #9 in review; #10 needs #9 |
+| M5 — Delivery | #21 offline test tier + CI, #11 live test queries, #12 user README | #21 merged; #11 needs #10; #12 last |
 
 Critical path: **#3 → #4 → #5 → #9 → #10 → #11 → #12**. Issues #6, #7 and #8 can run in
 parallel with M2.
@@ -97,7 +97,10 @@ IDs are checked against the citation registry, so the model can't invent a sourc
 | Two test tiers: offline tests + ruff in CI on every PR; live query tests only when `RUN_LIVE_TESTS=true` (default off) | [ADR-0004](docs/adr/0004-hybrid-test-tiers-and-ci.md) |
 | Local embeddings (fastembed `bge-small-en-v1.5`) + BM25 hybrid retrieval over Passages; the index build fails if an entry exceeds 512 tokens instead of truncating it silently | [ADR-0002](docs/adr/0002-local-embeddings-and-passage-retrieval.md) |
 | No XBRL fact-lookup tool: figures come from rendered tables, arithmetic goes through `calculate` | [ADR-0003](docs/adr/0003-no-xbrl-fact-tool.md) |
-| Anthropic SDK with a hand-written agent loop, no framework (LangChain etc.) | issue #9 |
+| Anthropic SDK with a hand-written agent loop, no framework (LangChain etc.), behind a `ChatModel` port | issue #9 |
+| Planning step is one structured-output call (`output_config.format`) returning `Plan(steps=[{tool, purpose}])`, not a forced `submit_plan` tool: `claude-sonnet-5-5` rejects forced `tool_choice` | issue #9 |
+| Tools return their Passages / web results as `ToolOutput.sources`; the agent loop registers them and shows them to the model under `[F#]`/`[W#]` before the model sees anything, so every ID the model can cite was assigned by code | issues #8, #9 |
+| At most 8 tool rounds per question, parallel `tool_use` blocks run concurrently; at the cap the model gets one tool-free turn to answer with what it has and name the gaps | issue #9 |
 | Citation IDs are assigned by code when tool results are returned, never by the model | issue #8 |
 | `calculate` parses with `ast` against an allow-list and never uses `eval`/`exec` | issue #7 |
 
@@ -127,16 +130,18 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 │   └── backend-python-instructions.md ✅ Python style rules
 ├── src/
 │   ├── main.py                    #10 CLI entry point
-│   ├── agent.py                   #9  planner + executor loop
+│   ├── agent.py                   ✅ `ResearchAgent`: planner call, then the tool-use executor loop (≤ 8 rounds)
+│   ├── agent_factory.py           ✅ `build_agent(settings)`: the composition root (index + tools + Anthropic)
 │   ├── tools/
-│   │   ├── registry.py            ✅ `Tool` protocol, `ToolOutput`, `ToolRegistry`
-│   │   ├── document_qa.py         #5  search_filing, get_passage
+│   │   ├── registry.py            ✅ `Tool` protocol, `ToolOutput` (content + citable `sources`), `ToolRegistry`
+│   │   ├── search_filing.py       ✅ `SearchFilingTool` (search_filing): hybrid search, optionally within one Item
+│   │   ├── get_passage.py         ✅ `GetPassageTool` (get_passage): follow "Note 5" / "Item 1A" / a passage_id
 │   │   ├── tavily_search.py       ✅ `WebSearchTool` (web_search): one retry on timeout, failures as error results
 │   │   ├── calculator.py          ✅ `CalculateTool` (calculate)
 │   │   └── arithmetic.py          ✅ `ast` allow-list evaluator behind `calculate` (no `eval`/`exec`)
 │   └── utils/
 │       ├── config.py              ✅ `Settings`: .env + environment, validated, secrets kept out of repr/logs
-│       ├── prompts.py             ✅ `load_prompt(name)` reads prompts/<name>.txt
+│       ├── prompts.py             ✅ `load_prompt(name)` reads prompts/<name>.txt; `render_prompt` fills `{{placeholders}}`
 │       ├── logging_config.py      ✅ logging setup
 │       ├── passage.py             ✅ `Passage` value object + `PassageKind`
 │       ├── filing_parser.py       ✅ `FilingParser`: HTML → Passages (Items, headings, risk factors, Notes)
@@ -156,18 +161,31 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 │       ├── filing_index.py        ✅ `FilingIndex.search(query, limit, item)` → `PassageHit`s (one per Passage)
 │       ├── filing_index_loader.py ✅ reuse the stored index or rebuild (content hash, `force_rebuild`, 512-token guard)
 │       ├── filing_index_factory.py ✅ `open_filing_index(settings, force_rebuild)`: wires the concrete adapters
-│       ├── web_search.py          ✅ `WebSearchClient` protocol, `WebSearchResult`, `WebSearchError`
+│       ├── filing_search.py       ✅ `FilingSearch` port that `search_filing` depends on (`FilingIndex` implements it)
+│       ├── cross_reference_resolver.py ✅ `CrossReferenceResolver`: "Note 5", "Part II, Item 7", passage_id → Passage + nested Passages
+│       ├── web_search.py          ✅ `WebSearchClient` protocol (returns `WebResult`s), `WebSearchError`
 │       ├── tavily_web_search_client.py ✅ Tavily implementation of `WebSearchClient`
-│       ├── web_result.py          ✅ `WebResult`: a web page as the citation layer sees it
+│       ├── web_result.py          ✅ `WebResult`: one web page (URL, title, excerpt, date or `None`), searched and cited
 │       ├── citations.py           ✅ `CitationRegistry`: code-assigned `F#`/`W#` IDs per query
 │       ├── citation_format.py     ✅ `CitationFormatter`: tool-result headers and Sources lines
-│       └── cited_answer.py        ✅ `CitationResolver`: drops unregistered markers, renumbers `[1]…`
-├── prompts/                       #5–#9 system_prompt, planner_prompt, tool_descriptions (never hard-coded)
+│       ├── cited_answer.py        ✅ `CitationResolver`: drops unregistered markers, renumbers `[1]…`
+│       ├── tool_result_citer.py   ✅ `ToolResultCiter`: registers a tool result's sources, renders them under `[F#]`/`[W#]`
+│       ├── chat_model.py          ✅ `ChatModel` port, `ModelReply`, `ChatModelError` / `ChatModelRefusalError`
+│       ├── anthropic_chat_model.py ✅ Anthropic implementation (`max_retries=3`, key-free one-line errors)
+│       ├── plan.py                ✅ `Plan` / `PlanStep` and the planner's JSON schema
+│       ├── planner.py             ✅ `Planner`: the structured-output planning call
+│       ├── agent_result.py        ✅ `AgentResult` (plan, tool trace, cited answer), `ToolCallRecord`
+│       └── agent_observer.py      ✅ `AgentObserver`: the plan and each tool call as they happen (CLI trace)
+├── prompts/                       ✅ every prompt; code never hard-codes prompt text
+│   ├── system_prompt.txt          ✅ executor rules: sources, Item scoping, citations, periods, calculate, gaps
+│   ├── planner_prompt.txt         ✅ planning call
+│   ├── round_limit.txt            ✅ the "answer with what you have" turn after 8 tool rounds
+│   └── tool_descriptions.txt      ✅ one `## <tool>` section per tool
 ├── tests/
 │   ├── conftest.py                ✅ session fixtures (parsed Filing, built index) + the `RUN_LIVE_TESTS` gate
 │   ├── live_switch.py             ✅ `RUN_LIVE_TESTS` and API-key checks for `live` tests
-│   ├── fakes/                     ✅ in-memory port fakes (index store, embedders, web search client)
-│   ├── offline/                   ✅ offline tier: parser, index, calculate, citations, web_search, live switch
+│   ├── fakes/                     ✅ in-memory port fakes (index store, embedders, web search client, scripted chat model)
+│   ├── offline/                   ✅ offline tier: parser, index, calculate, citations, web_search, agent loop, live switch
 │   └── test_queries.py            #11 live end-to-end tests of the two queries (`@pytest.mark.live`)
 ├── .github/workflows/
 │   ├── ci.yml                     ✅ ruff + offline tests on every PR and push to main (regression gate)
@@ -187,6 +205,11 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
   key is missing, it fails at startup with a message naming the variable.
 - **`load_prompt`** (`src/utils/prompts.py`). Every prompt and tool description lives in
   `prompts/*.txt`.
+- **`build_agent(settings)`** (`src/agent_factory.py`). Returns a `ResearchAgent` whose
+  `answer(question)` gives an `AgentResult`: the plan, the ordered tool trace (name, args,
+  ok/error, citation IDs), the answer with `[1]…` markers and its rendered Sources. Pass an
+  `AgentObserver` to see the plan and each tool call live. Model failures raise
+  `ChatModelError` with a one-line, key-free message.
 
 ---
 
@@ -207,6 +230,7 @@ pytest -m "not live"                   # offline tier, no keys needed (see §6)
 | `TAVILY_API_KEY` | yes | — | web search (free tier: 1,000 requests/month) |
 | `ANTHROPIC_MODEL` | no | `claude-sonnet-5-5` | model the agent uses |
 | `FILING_PATH` | no | `data/apple_10k_2025.htm` | the Filing |
+| `FILING_FISCAL_YEAR` | no | `2025` | the Filing's fiscal year, shown in citations as `10-K FY<year>`; change it with `FILING_PATH` |
 | `INDEX_DIR` | no | `.index` | local retrieval index (git-ignored) |
 | `LOG_LEVEL` | no | `INFO` | standard logging level |
 | `RUN_LIVE_TESTS` | no | `false` | `true` runs the live query tests, which call the paid APIs |
@@ -215,7 +239,8 @@ Real environment variables override `.env`, except blank ones. On the first run 
 embedding model is downloaded into `INDEX_DIR/models` and the index is built in
 `INDEX_DIR/chroma`. Later runs reuse the index unless the Filing changes.
 
-There is no runnable entry point yet. `python src/main.py` arrives with #10.
+There is no CLI yet: `python src/main.py` arrives with #10. Until then the agent is reachable
+through `agent_factory.build_agent(Settings.load()).answer(question)`.
 
 ---
 

@@ -11,7 +11,8 @@ from tavily.errors import (
 )
 from tavily.errors import TimeoutError as TavilyTimeoutError
 
-from utils.web_search import WebSearchError, WebSearchResult, WebSearchTimeoutError
+from utils.web_result import WebResult
+from utils.web_search import WebSearchError, WebSearchTimeoutError
 
 # Fixed search parameters (issue #6): finance-tuned, deep search, five results,
 # no Tavily-generated answer (the agent writes its own) and no domain allow-list.
@@ -51,7 +52,7 @@ class TavilyWebSearchClient:
         self._client = TavilyClient(api_key=api_key)
         self._timeout_seconds = timeout_seconds
 
-    def search(self, query: str) -> list[WebSearchResult]:
+    def search(self, query: str) -> list[WebResult]:
         """Return up to five results for `query` (see `WebSearchClient.search`)."""
         try:
             raw = self._client.search(
@@ -85,12 +86,14 @@ class TavilyWebSearchClient:
             response = _TavilyResponse.model_validate(raw)
         except ValidationError as error:
             raise WebSearchError("Tavily returned a response in an unexpected format.") from error
+        # A result without a URL cannot be cited, so it is not returned.
         return [
-            WebSearchResult(
+            WebResult(
                 url=result.url,
                 title=result.title,
                 content=result.content,
-                published_date=result.published_date or None,
+                published_date=result.published_date,
             )
             for result in response.results
+            if result.url.strip()
         ]
