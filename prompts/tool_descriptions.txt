@@ -12,3 +12,12 @@ Example: R&D as a percentage of net sales -> "34550 / 416161 * 100".
 
 Limits: at most 500 characters, exponents up to 64, and values up to 1e21 in absolute value.
 Division by zero or an expression outside the allow-list returns an error that says what to fix.
+
+## web_search
+Search the web for current or external information that is not in Apple's 10-K Filing.
+
+Use it for: current stock prices and market capitalisation, competitor figures (for example Microsoft's latest-quarter gross margin), recent news and events, and anything dated after the Filing's fiscal year. Do not use it for facts the Filing itself reports (Apple's own risk factors, revenue, R&D spend and other fiscal-year figures) - search the Filing for those.
+
+Write a specific query that names the company, the metric and the period, such as "Microsoft gross margin fiscal 2026 Q1". Returns up to 5 results, each with url, title, content (an excerpt) and published_date (null when the source gives none).
+
+Prefer primary sources - investor-relations pages, SEC filings and earnings releases - over aggregators and commentary. When you use a result, always state the period the figure covers (quarter or fiscal year) and cite its URL and published date. If the results do not state the period clearly, say so rather than guessing.
