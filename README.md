@@ -45,7 +45,7 @@ first, and update it after each merge. Snapshot as of 2026-11-03:
 | Milestone | Issues | State |
 |---|---|---|
 | M1 — Foundation | #1 docs/ADRs, #2 scaffold + config + tool registry + Filing | ✅ merged |
-| M2 — Document QA | #3 filing parser → #4 chunker + hybrid index → #5 `search_filing` / `get_passage` | #3 in progress; #4, #5 chained behind it |
+| M2 — Document QA | #3 filing parser → #4 chunker + hybrid index → #5 `search_filing` / `get_passage` | #3 in review; #4, #5 chained behind it |
 | M3 — Web search & calc | #6 Tavily `web_search`, #7 `calculate` | ready to start |
 | M4 — Agent & CLI | #8 citation registry, #9 planner + executor, #10 CLI | #8 ready; #9 needs #5–#8; #10 needs #9 |
 | M5 — Delivery | #11 live test queries, #12 user README | needs #10, then #11 |
@@ -136,7 +136,11 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 │       ├── config.py              ✅ `Settings`: .env + environment, validated, secrets kept out of repr/logs
 │       ├── prompts.py             ✅ `load_prompt(name)` reads prompts/<name>.txt
 │       ├── logging_config.py      ✅ logging setup
-│       ├── filing_parser.py       #3  HTML → Passages
+│       ├── passage.py             ✅ `Passage` value object + `PassageKind`
+│       ├── filing_parser.py       ✅ `FilingParser`: HTML → Passages (Items, headings, risk factors, Notes)
+│       ├── filing_layout.py       ✅ HTML → ordered text/table/anchor blocks with page numbers
+│       ├── table_renderer.py      ✅ `<table>` → Markdown (merges `$`/`%` cells, drops spacer columns)
+│       ├── html_text.py           ✅ visible text and bold/italic emphasis of inline-styled elements
 │       ├── chunker.py             #4  Passages → Index Entries / Table Cards
 │       ├── index_store.py         #4  Chroma + BM25, RRF, content-hash rebuild
 │       └── citations.py           #8  CitationRegistry + Sources rendering
