@@ -9,9 +9,10 @@ import sys
 from collections.abc import Callable, Sequence
 
 from agent_factory import build_agent
-from cli.cli_app import EXIT_CONFIG_ERROR, EXIT_INTERRUPTED, run_cli
+from cli.cli_app import EXIT_CONFIG_ERROR, EXIT_FAILURE, EXIT_INTERRUPTED, run_cli
 from cli.cli_options import parse_cli_args
 from utils.config import ConfigError, Settings
+from utils.filing_index_factory import INDEX_LOAD_ERRORS
 from utils.logging_config import configure_logging
 
 with contextlib.suppress(ImportError):  # line editing and history at the prompt, where available
@@ -37,6 +38,9 @@ def main(
             sys.stdout,
             sys.stderr,
         )
+    except INDEX_LOAD_ERRORS as error:
+        print(f"Error: cannot open the Filing index: {error}", file=sys.stderr)
+        return EXIT_FAILURE
     except KeyboardInterrupt:  # while the index loads, before the prompt is up
         print(file=sys.stderr)
         return EXIT_INTERRUPTED

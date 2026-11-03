@@ -28,11 +28,6 @@ class ToolCallRecord:
     def ok(self) -> bool:
         return not self.is_error
 
-    @property
-    def error(self) -> str | None:
-        """The error text when the call failed, else `None`."""
-        return self.output if self.is_error else None
-
 
 @dataclass(frozen=True)
 class AgentResult:

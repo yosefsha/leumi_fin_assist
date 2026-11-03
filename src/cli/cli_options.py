@@ -12,7 +12,8 @@ DESCRIPTION = (
 EPILOG = (
     "API keys and other settings come from the environment or .env (see .env.example). "
     "Logs go to stderr at LOG_LEVEL. Exit status: 0 on success, 1 when the model API "
-    "fails, 2 for invalid usage or configuration, 130 when interrupted."
+    "fails or the Filing index cannot be opened, 2 for invalid usage or configuration, "
+    "130 when a --query or startup is interrupted (leaving the prompt is a normal exit)."
 )
 
 

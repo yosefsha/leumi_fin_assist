@@ -6,7 +6,10 @@ assert which tools a real model would choose (ADR-0004); the live tier does that
 """
 
 import json
+import os
+import signal
 import threading
+import time
 from collections.abc import Mapping
 from datetime import date
 from typing import Any
@@ -180,7 +183,7 @@ def test_tool_failures_go_back_to_the_model_as_error_results() -> None:
     assert results[1]["content"].startswith("Unknown tool 'no_such_tool'")
     assert results[2]["content"] == "Tool broken failed unexpectedly (RuntimeError)."
     assert [record.ok for record in result.trace] == [False, False, False]
-    assert result.trace[1].error == results[1]["content"]
+    assert result.trace[1].output == results[1]["content"]
 
 
 def test_parallel_tool_calls_run_concurrently_and_are_all_answered_in_one_message() -> None:
@@ -201,6 +204,40 @@ def test_parallel_tool_calls_run_concurrently_and_are_all_answered_in_one_messag
         ("beta", {"n": 2}),
         ("gamma", {"n": 3}),
     ]
+
+
+class _CtrlCTool(_StaticTool):
+    """Sends this process SIGINT (Ctrl-C) while the main thread waits for the round."""
+
+    def run(self, args: Mapping[str, Any]) -> ToolOutput:
+        time.sleep(0.1)
+        os.kill(os.getpid(), signal.SIGINT)
+        return super().run(args)
+
+
+class _BlockingTool(_StaticTool):
+    """Blocks until `release` is set, like a slow web request."""
+
+    def __init__(self, name: str, release: threading.Event) -> None:
+        super().__init__(name, ToolOutput(content=f"{name} done"))
+        self._release = release
+
+    def run(self, args: Mapping[str, Any]) -> ToolOutput:
+        self._release.wait(timeout=10)
+        return super().run(args)
+
+
+def test_an_interrupt_during_a_tool_round_does_not_wait_for_calls_in_flight() -> None:
+    release = threading.Event()
+    tools = [_CtrlCTool("stop", ToolOutput(content="")), _BlockingTool("slow", release)]
+    model = ScriptedChatModel([tool_reply(("stop", {}), ("slow", {}))])
+    started = time.monotonic()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _agent(model, _registry(*tools)).answer("question")
+        assert time.monotonic() - started < 5  # the slow call blocks for 10 s
+    finally:
+        release.set()
 
 
 def test_sources_get_citation_ids_before_the_model_sees_them() -> None:

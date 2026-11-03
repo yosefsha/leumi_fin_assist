@@ -135,6 +135,7 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 │   │   ├── cli_app.py             ✅ `run_cli`: build the agent once, then one `--query` or the REPL; exit codes
 │   │   ├── repl.py                ✅ `> ` loop: `exit`/`quit`/Ctrl-D/Ctrl-C leave, blank lines ignored
 │   │   ├── question_session.py    ✅ one question: progress line, answer, one-line API error, Ctrl-C cancels
+│   │   ├── question_outcome.py    ✅ `QuestionOutcome`: answered / failed / cancelled (→ exit status)
 │   │   ├── question_answerer.py   ✅ `QuestionAnswerer` protocol the CLI needs (`ResearchAgent` implements it)
 │   │   ├── trace_printer.py       ✅ `TracePrinter`: the `AgentObserver` that prints `[Plan]` / `[Tool: …]` live
 │   │   ├── tool_call_format.py    ✅ one-line tool-call descriptions (`search_filing(item="1A") "…"`, `calculate` result)
@@ -151,7 +152,7 @@ What exists today is marked ✅. The rest is planned, with the issue that adds i
 │   └── utils/
 │       ├── config.py              ✅ `Settings`: .env + environment, validated, secrets kept out of repr/logs
 │       ├── prompts.py             ✅ `load_prompt(name)` reads prompts/<name>.txt; `render_prompt` fills `{{placeholders}}`
-│       ├── logging_config.py      ✅ logging to stderr; third-party libraries held at WARNING unless DEBUG
+│       ├── logging_config.py      ✅ logging to stderr; third-party records below WARNING dropped unless DEBUG
 │       ├── passage.py             ✅ `Passage` value object + `PassageKind`
 │       ├── filing_parser.py       ✅ `FilingParser`: HTML → Passages (Items, headings, risk factors, Notes)
 │       ├── filing_layout.py       ✅ HTML → ordered text/table/anchor blocks with page numbers
@@ -259,9 +260,9 @@ python src/main.py --rebuild-index                  # rebuild the Filing index f
 
 Without `--quiet`, each question shows `[Agent processing...]`, the `[Plan]`, and one
 `[Tool: …]` line per tool call as it runs, then the answer and Sources. Ctrl-C during a
-question cancels it and returns to the prompt. Logs go to stderr. Exit status: 0 success,
-1 model API failure (`--query`), 2 bad usage or configuration (such as a missing key),
-130 interrupted. The user-facing guide is #12.
+question cancels it and returns to the prompt. Logs go to stderr; under `--quiet` so do the
+prompt and any notes. Exit status: 0 success, 1 model API failure (`--query`) or an index that
+cannot be opened, 2 bad usage or configuration (such as a missing key), 130 interrupted. The user-facing guide is #12.
 
 ---
 

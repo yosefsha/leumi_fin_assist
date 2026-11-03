@@ -14,12 +14,13 @@ from typing import Any
 
 import pytest
 
+import main as main_module
 from agent import ResearchAgent
 from cli.answer_printer import NO_SOURCES, ROUND_LIMIT_NOTICE, TRUNCATED_NOTICE
 from cli.cli_app import (
     BANNER,
-    EXIT_API_FAILURE,
     EXIT_CONFIG_ERROR,
+    EXIT_FAILURE,
     EXIT_INTERRUPTED,
     EXIT_OK,
     run_cli,
@@ -39,7 +40,8 @@ from utils.chat_model import ChatModelError
 from utils.citation_format import CitationFormatter
 from utils.cited_answer import CitationResolver, CitedAnswer
 from utils.config import Settings
-from utils.logging_config import APP_LOGGERS, configure_logging
+from utils.embedder import EmbedderError
+from utils.logging_config import LibraryNoiseFilter, configure_logging
 from utils.passage import Passage, PassageKind
 from utils.plan import Plan
 from utils.tool_result_citer import ToolResultCiter
@@ -118,7 +120,7 @@ def _lines(*lines: str | type[BaseException]) -> Callable[[str], str]:
     pending: Iterator[str | type[BaseException]] = iter(lines)
 
     def read_line(prompt: str) -> str:
-        assert prompt == PROMPT
+        assert prompt in (PROMPT, "")  # "" when --quiet writes the prompt to stderr itself
         line = next(pending, EOFError)
         if isinstance(line, type):
             raise line()
@@ -162,6 +164,28 @@ def test_ctrl_d_or_ctrl_c_at_the_prompt_leaves_cleanly(key: type[BaseException])
     status, out, err = _run(CliOptions(), agent, _lines("", key, "never read"))
     assert (status, agent.questions, err) == (EXIT_OK, [], "")
     assert out == f"{BANNER}\n\n"  # the banner, then a newline that ends the prompt's line
+
+
+def test_quiet_repl_keeps_the_prompt_and_separators_off_stdout() -> None:
+    agent = _StubAgent(result=_result(CitedAnswer(body="Hi.", sources=())))
+    status, out, err = _run(CliOptions(quiet=True), agent, _lines("one", "two"))
+    assert status == EXIT_OK
+    assert out == f"Hi.\n\n{NO_SOURCES}\n" * 2
+    assert err == f"{PROMPT}\n{PROMPT}\n{PROMPT}\n"
+
+
+def test_ctrl_c_while_the_answer_prints_cancels_only_that_question() -> None:
+    class _InterruptingOut(io.StringIO):
+        def write(self, text: str) -> int:
+            if text.startswith("Hi."):
+                raise KeyboardInterrupt
+            return super().write(text)
+
+    agent = _StubAgent(result=_result(CitedAnswer(body="Hi.", sources=())))
+    out, err = _InterruptingOut(), io.StringIO()
+    status = run_cli(CliOptions(), lambda _: agent, _lines("one", "two"), out, err)
+    assert (status, agent.questions) == (EXIT_OK, ["one", "two"])
+    assert err.getvalue() == f"{CANCELLED_LINE}\n{CANCELLED_LINE}\n"
 
 
 def test_blank_lines_are_ignored() -> None:
@@ -247,7 +271,7 @@ def test_query_without_quiet_shows_the_trace_but_no_banner() -> None:
 def test_query_exits_non_zero_on_an_api_failure() -> None:
     build = _scripted_builder([ChatModelError("Could not reach the model API.")])
     status, out, err = _run(CliOptions(quiet=True, query="q"), build)
-    assert (status, out, err) == (EXIT_API_FAILURE, "", "Error: Could not reach the model API.\n")
+    assert (status, out, err) == (EXIT_FAILURE, "", "Error: Could not reach the model API.\n")
 
 
 def test_query_interrupted_exits_130() -> None:
@@ -359,27 +383,55 @@ def test_missing_api_key_is_one_startup_line_naming_the_variable(
     assert captured.err.startswith("Error: Required setting ANTHROPIC_API_KEY is not set.")
 
 
+def test_an_index_that_cannot_be_opened_is_one_startup_line(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def failing_build(*_: object) -> ResearchAgent:
+        raise EmbedderError("Cannot load the embedding model: offline")
+
+    monkeypatch.setattr(main_module, "build_agent", failing_build)
+    monkeypatch.setattr(main_module, "configure_logging", lambda level: None)
+    settings = Settings.from_mapping({"ANTHROPIC_API_KEY": "a", "TAVILY_API_KEY": "t"})
+
+    status = main(["--query", "q"], load_settings=lambda: settings)
+
+    captured = capsys.readouterr()
+    assert (status, captured.out) == (EXIT_FAILURE, "")
+    assert captured.err == (
+        "Error: cannot open the Filing index: Cannot load the embedding model: offline\n"
+    )
+
+
 @pytest.fixture
 def restore_logging() -> Iterator[None]:
     root = logging.getLogger()
     handlers, level = root.handlers[:], root.level
-    app_levels = {name: logging.getLogger(name).level for name in APP_LOGGERS}
     yield
     root.handlers[:] = handlers
     root.setLevel(level)
-    for name, app_level in app_levels.items():
-        logging.getLogger(name).setLevel(app_level)
+
+
+def _passes(record_logger: str, level: int) -> bool:
+    record = logging.LogRecord(record_logger, level, __file__, 1, "message", None, None)
+    return all(handler.filter(record) for handler in logging.getLogger().handlers)
 
 
 @pytest.mark.usefixtures("restore_logging")
-@pytest.mark.parametrize(
-    ("level", "library_level"),
-    [("INFO", logging.WARNING), ("ERROR", logging.ERROR), ("DEBUG", logging.DEBUG)],
-)
-def test_library_loggers_stay_quiet_unless_debugging(level: str, library_level: int) -> None:
-    configure_logging(level)
-    app_level = logging.getLevelNamesMapping()[level]
-    assert logging.getLogger("httpx").getEffectiveLevel() == library_level
-    assert logging.getLogger("chromadb.api").getEffectiveLevel() == library_level
-    assert logging.getLogger("utils.filing_index_loader").getEffectiveLevel() == app_level
-    assert logging.getLogger("agent").getEffectiveLevel() == app_level
+def test_library_records_below_warning_are_dropped_and_the_apps_are_kept() -> None:
+    configure_logging("INFO")
+    assert not _passes("httpx", logging.INFO)
+    assert not _passes("chromadb.api.segment", logging.INFO)
+    assert _passes("httpx", logging.WARNING)
+    assert _passes("utils.filing_index_loader", logging.INFO)
+    assert _passes("agent", logging.INFO)
+    assert _passes("cli.repl", logging.INFO)
+    assert logging.getLogger().level == logging.INFO
+
+
+@pytest.mark.usefixtures("restore_logging")
+def test_debug_shows_library_records_too() -> None:
+    configure_logging("DEBUG")
+    assert _passes("httpx", logging.DEBUG)
+    assert not any(
+        isinstance(f, LibraryNoiseFilter) for h in logging.getLogger().handlers for f in h.filters
+    )
