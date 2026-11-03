@@ -3,11 +3,8 @@ name: Claude PR Review
 # Automated review on every pull request: a top-level findings comment plus
 # inline comments anchored to the lines they concern.
 #
-# Kept out of ci.yml deliberately. ci.yml is the deterministic gate that decides
-# whether a change is mergeable; this one calls a paid external API. Combined, a
-# rate limit or an outage would redden the merge gate for a reason unrelated to
-# the code — and a gate that reddens for unrelated reasons is one people learn
-# to ignore.
+# This is the project's only automated gate: there is no ci.yml, because the
+# tests call live paid APIs and run locally (docs/adr/0001-cli-agent-assignment-layout-no-ci.md).
 
 on:
   pull_request:
@@ -107,41 +104,39 @@ jobs:
             Components are built independently against each other's published
             contracts, so the dangerous bug is two of them disagreeing about a
             shared shape.
-            - CD-1: An id, field name, status code, or JSON casing that differs
-              between producer and consumer.
+            - CD-1: An id, field name, or JSON casing that differs between
+              producer and consumer (e.g. a tool's declared schema vs the
+              arguments its implementation reads).
             - CD-2: An implementation whose behaviour diverges from the Protocol
               or interface it satisfies, or from the in-memory fake that tests
               substitute for it.
-            - CD-3: Frontend types that no longer match what the API serves.
+
+            ## Project rules
+            - P-1: Citations in an answer come only from the citation registry
+              the tools populate (a Passage's Section Path + page, or a web
+              result's URL + date) — never invented, reconstructed, or taken from
+              model text.
+            - P-2: The `calculate` tool never uses `eval`, `exec`, or any other
+              dynamic code execution on model-supplied input.
+            - P-3: Every Index Entry fits the embedding model's 512-token input;
+              the index build raises on an oversized entry rather than letting it
+              be silently truncated (ADR-0002).
+            - P-4: Prompts are loaded from files under `prompts/`, not hardcoded
+              as string literals in code.
+            - P-5: An ADR under `docs/adr/` that the change contradicts — flag it
+              even if the code is otherwise correct.
 
             ## Security
-            - S-1: A session id or token is a bearer secret — it must never reach
-              a log, an error body, or a URL. `python-json-logger` promotes
-              `extra` keys to top-level fields, so logging one anywhere writes a
-              live credential to CloudWatch.
-            - S-2: Routes take identity from the auth/session dependency only —
-              never from a query parameter or header.
-            - S-3: No raw string interpolation into SQL; sort/filter keys resolve
-              through an explicit whitelist.
-            - S-4: Unbounded input — a missing `limit` ceiling is an unbounded
-              scan on a public endpoint.
+            - S-1: An API key (LLM provider, Tavily) is a secret — it must never
+              reach a log line, an exception message, printed output, or a
+              committed file. Keys come from environment variables only.
 
             ## Tests
             - T-1: A test that asserts the current behaviour of a bug.
             - T-2: A test that cannot fail, or an assertion weakened to make a
               failure go away.
-            - T-3: A test that skips itself in CI — a skip there is
-              indistinguishable from a pass.
 
-            ## Architecture
-            - A-1: Route handlers stay thin and depend on Protocols — no ORM
-              import in a route module.
-            - A-2: Storage types never escape the repository layer — no ORM row
-              or cache-client type in a domain signature.
-            - A-3: Frontend stores mirror server state; they never own values the
-              server is authoritative for.
-            - A-4: `ruff` and `eslint` already run in CI — do not duplicate them.
-              No style nits, no "consider extracting this", no praise.
+            No style nits, no "consider extracting this", no praise.
 
             Report only what you are confident is a real problem, and give a
             concrete failure scenario for any correctness claim: specific inputs
