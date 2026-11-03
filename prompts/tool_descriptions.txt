@@ -16,9 +16,9 @@ Division by zero or an expression outside the allow-list returns an error that s
 ## web_search
 Search the web for current or external information that is not in Apple's 10-K Filing.
 
-Use it for: current stock prices and market capitalisation, competitor figures (for example Microsoft's latest-quarter gross margin), recent news and events, and anything dated after the Filing's fiscal year. Do not use it for facts the Filing itself reports (Apple's own risk factors, revenue, R&D spend and other fiscal-year figures) - search the Filing for those.
+Use it for: current stock prices and market capitalisation, competitor figures (for example a competitor's latest-quarter gross margin), recent news and events, and anything dated after the Filing's fiscal year. Do not use it for facts the Filing itself reports (Apple's own risk factors, revenue, R&D spend and other fiscal-year figures) - search the Filing for those.
 
-Write a specific query that names the company, the metric and the period, such as "Microsoft gross margin fiscal 2026 Q1". Returns {"query", "results_found"} followed by up to 5 results, each headed by its citation ID: "[W1] <title> — <url> (as of <published date> | date unknown)" and then an excerpt of the page. Most results carry no published date.
+Write a specific query that names the company, the metric and the period, such as "<company> gross margin fiscal 2026 Q1". Returns {"query", "results_found"} followed by up to 5 results, each headed by its citation ID: "[W1] <title> — <url> (as of <published date> | date unknown)" and then an excerpt of the page. Most results carry no published date.
 
 Prefer primary sources - investor-relations pages, SEC filings and earnings releases - over aggregators and commentary. When you use a result, always state the period the figure covers (quarter or fiscal year) and cite it by its [W#] ID. If the excerpt does not state the period clearly, say so rather than guessing.
 

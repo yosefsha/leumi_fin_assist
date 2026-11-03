@@ -17,8 +17,9 @@ import pytest
 
 from agent import ResearchAgent
 from agent_factory import build_agent
+from cli.trace_printer import describe_check
 from tools.tavily_search import NO_RESULTS_PREFIX
-from utils.agent_result import AgentResult, ToolCallRecord
+from utils.agent_result import AgentResult, EvidenceCheck, ToolCallRecord
 from utils.config import Settings
 from utils.cross_reference_resolver import CrossReferenceResolver, UnknownReferenceError
 from utils.filing_items import parse_item_label
@@ -240,14 +241,21 @@ def _cited_paths(sources: Iterable[str]) -> list[str]:
 
 
 def _describe(result: AgentResult) -> str:
-    """The plan, trace and answer, for a failure message or the `-s` run log."""
+    """The plan, trace, evidence checks and answer, for a failure message or the `-s` run log."""
     trace = "\n".join(_trace_line(call) for call in result.trace)
+    checks = "\n".join(_check_lines(check) for check in result.evidence_checks) or "none"
     return (
         f"QUESTION: {result.question}\n\nPLAN:\n{result.plan.numbered()}\n\n"
-        f"TRACE:\n{trace}\n\n"
+        f"TRACE:\n{trace}\n\nEVIDENCE CHECKS:\n{checks}\n\n"
         f"hit_round_limit={result.hit_round_limit} answer_truncated={result.answer_truncated}"
         f"\n\nANSWER:\n{result.answer.text}"
     )
+
+
+def _check_lines(check: EvidenceCheck) -> str:
+    """The check's `[Check]` text, then each gap's retry guidance."""
+    gaps = check.review.gaps if check.review is not None else ()
+    return "\n".join([describe_check(check), *(f"  next: {gap.retry_guidance}" for gap in gaps)])
 
 
 def _trace_line(call: ToolCallRecord) -> str:

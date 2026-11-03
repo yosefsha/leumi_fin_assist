@@ -2,7 +2,8 @@
 
 A command-line AI agent that answers questions about Apple Inc. from Apple's FY2025 Form 10-K
 (the **Filing**) and live web search. It plans its approach, calls tools (hybrid retrieval over
-the Filing, Tavily web search, an exact calculator), and cites every claim to a Section Path and
+the Filing, Tavily web search, an exact calculator), checks its evidence before answering, and
+cites every claim to a Section Path and
 page of the Filing or to a dated web source.
 
 It is built for the two test queries of the assignment ([`docs/TASKS.md`](docs/TASKS.md)):
@@ -27,6 +28,7 @@ Ask a question about the filing, or type 'exit' to quit.
 [Tool: get_passage "item-1a-003"]
 [Tool: get_passage "item-1a-004"]
 [Tool: calculate] 34550 / 416161 * 100 = 8.302075398703867
+[Check] evidence sufficient
 
 **Note on "top 3":** Apple's 10-K does not rank its risk factors by importance. …
 …
@@ -141,8 +143,10 @@ python src/main.py --help
   returns to the prompt.
 - **Each answer** is preceded by `[Agent processing...]`, the `[Plan]`, and one `[Tool: …]` line
   per tool call as it runs (`[Tool error: … — reason]` for a failed call; `calculate` shows its
-  result). Then the answer and a numbered **Sources** list.
-- **`--quiet`** drops the progress line, plan and trace. stdout then carries only answers and
+  result). A `[Check] …` line reports the evidence check on the draft answer: `evidence
+  sufficient`, or `<n> gap(s): <requirement> — <problem> → retrying` when the agent goes back
+  for more evidence. Then the answer and a numbered **Sources** list.
+- **`--quiet`** drops the progress line, plan, trace and `[Check]` lines. stdout then carries only answers and
   Sources; the prompt, notes and errors go to stderr.
 - **Logs** go to stderr at `LOG_LEVEL` (default `INFO`). Third-party libraries are only shown
   at WARNING and above unless `LOG_LEVEL=DEBUG`, which also logs token usage per model call.
@@ -176,9 +180,10 @@ RUN_LIVE_TESTS=true pytest -m live -v -s
 | Sources | ≥ 3 distinct risk-factor Passages; Item 8 cited | ≥ 1 Filing Passage and ≥ 1 web source |
 | Figures | R&D share of net sales within tolerance of the value computed from the parsed income statement (8.30%) | Apple gross margin within tolerance (46.9%) |
 
-`-s` prints each run's plan, tool trace (round, tool, arguments, citation IDs) and full answer
-with Sources, even when the test passes; on failure they are in the assertion message anyway.
-The two runs take about a minute together (42 s in the last recorded run).
+`-s` prints each run's plan, tool trace (round, tool, arguments, citation IDs), evidence checks
+(with each gap's retry guidance) and full answer with Sources, even when the test passes; on failure they are in the assertion message anyway.
+The two runs take one to two minutes together (66 s in the last recorded run, which included an
+evidence-check retry on Query 2).
 
 **Live tests are off by default.** Each run spends Anthropic tokens and Tavily quota, so the
 `live` tests are skipped ("set RUN_LIVE_TESTS=true to run") unless `RUN_LIVE_TESTS=true` is set
@@ -190,7 +195,7 @@ skipping it. See [ADR-0004](docs/adr/0004-hybrid-test-tiers-and-ci.md).
 ```bash
 pip install ruff            # the linter is a development tool, not in requirements.txt
 ruff check .
-pytest -m "not live"        # 160 tests, about 20–45 s (most of it embedding the Filing once)
+pytest -m "not live"        # 181 tests, about 20–70 s (most of it embedding the Filing once)
 ```
 
 Plain `pytest` runs the offline tier and reports the two live tests as skipped.
@@ -237,7 +242,7 @@ Sources:
 [4] 10-K FY2025 — Item 8 > CONSOLIDATED STATEMENTS OF OPERATIONS, p. 29
 ```
 
-### Query 2 — document + web (25–38 s, about 10 tool calls in 3–4 rounds)
+### Query 2 — document + web (25–38 s, about 10 tool calls in 3–4 rounds; about 50 s with an evidence-check retry)
 
 ```
 [Plan] 1) search_filing — Search Item 8 for 'total net sales' and 'gross margin' …
@@ -280,7 +285,22 @@ Sources:
 
 The Apple half is correct and fully cited (46.9% agrees with both the income statement and
 Apple's MD&A). The Microsoft half is the known weak spot; see
-[Known limitations](#known-limitations).
+[Known limitations](#known-limitations). That excerpt predates the evidence check (#29). Now the
+draft answer is checked, and when the Microsoft figure is a segment, secondary or missing figure,
+the agent searches again with the check's guidance:
+
+```
+[Check] 1 gap: Microsoft company-wide gross margin, latest quarter (Q1 FY2027, quarter ended
+        Sept 30, 2026) — secondary_source → retrying
+[Tool: web_search "Microsoft FY27 Q1 income statement total cost of revenue 10-Q September 30, 2026 …"]
+…
+[Tool: calculate] (45.9 + 16.6) / 92.3 * 100 = 67.71…
+```
+
+In that run the final answer computed Microsoft's company-wide margin, (92.3 − 29.7) / 92.3 =
+67.8%, from revenue and cost of revenue, cross-checked it at 67.7%, and said both inputs came
+from secondary sources. The three #29 runs are in
+[`docs/query-run-results.md`](docs/query-run-results.md).
 
 ---
 
@@ -305,9 +325,11 @@ Apple's MD&A). The Microsoft half is the known weak spot; see
  │  Index Entries / Table Cards ◄ Chunker ◄ Passages ◄ FilingParser ◄ data/*.htm           │
  │                                                                                         │
  │ 3. ToolResultCiter: each source gets [F#]/[W#] from a per-question CitationRegistry     │
- │ 4. CitationResolver: final answer's markers validated → [1]… + Sources list             │
+ │ 4. EvidenceReviewer: draft answer + cited evidence ── one structured-output call ──►    │
+ │    sufficient → answer │ gaps + retry guidance → back to 2 (once, same 8-round budget)   │
+ │ 5. CitationResolver: final answer's markers validated → [1]… + Sources list             │
  └─────────────────────────────────────────────────────────────────────────────────────────┘
-                                   │ AgentResult (plan, trace, cited answer)
+                                   │ AgentResult (plan, trace, evidence checks, cited answer)
                                    ▼
                        answer + Sources on stdout
 ```
@@ -330,7 +352,7 @@ change.
 
 ### How the agent decides which tool to use
 
-Two stages, both driven by prompts in `prompts/`:
+Three stages, all driven by prompts in `prompts/`:
 
 1. **Planning** (Bonus 3). One structured-output call returns a `Plan`: ordered `{tool,
    purpose}` steps, with `tool` constrained by the schema to a registered tool name. The planner
@@ -344,6 +366,15 @@ Two stages, both driven by prompts in `prompts/`:
    guidance rather than a script: it may skip steps, add some (e.g. follow a "see Note 5"
    with `get_passage`), retry with different wording, or issue several independent calls in one
    turn, which run concurrently.
+3. **Evidence check** ([ADR-0006](docs/adr/0006-model-driven-evidence-check.md)). When the
+   model answers without calling a tool, that draft and every tool result it saw (with citation
+   IDs, titles, URLs and dates) go to one structured-output call. The call returns an
+   `EvidenceReview`: `sufficient`, or `gaps`, each with a `requirement`, a `problem`
+   (`missing`, `segment_not_company_wide`, `secondary_source`, `undated_or_stale`,
+   `period_mismatch`, `other`) and `retry_guidance`. Gaps go back to the executor as a user
+   turn, and tool use resumes. The model writes the guidance (for example "find the latest
+   earnings release's revenue and cost of revenue and compute the margin with `calculate`"), so
+   the same check works for any company, metric or source.
 
 ### How information flows
 
@@ -372,6 +403,8 @@ failing if a placeholder and its value don't match.
 | `planner_prompt.txt` | The planning call: usually 2–6 steps, each naming a tool and its purpose, with the routing rules above. Placeholders `{{fiscal_year}}`, `{{today}}`, `{{tools}}`. |
 | `tool_descriptions.txt` | One `## <tool>` section per tool, used as the tool's `description` for both the planner and the executor. |
 | `round_limit.txt` | Appended after the 8th tool round: answer now with the evidence gathered, cite only known IDs, and name what is missing. |
+| `evidence_check_prompt.txt` | The evidence check: what each gap `problem` means, which gaps not to report (wording, facts the question does not ask for, Filing facts to replace with newer ones), how to write retry guidance (company's own statements first, components plus `calculate` when a ratio is not stated, new query wording, never a segment for the company), at most three gaps, one per fact. Placeholders `{{fiscal_year}}`, `{{today}}`, `{{tools}}`. |
+| `evidence_retry.txt` | The user turn that sends the gaps back: the numbered gaps with their guidance, the tool rounds left, and "write the complete answer again". Placeholders `{{gaps}}`, `{{rounds_left}}`. |
 
 ---
 
@@ -385,13 +418,13 @@ Passage, Index Entry, Table Card, Citation) are defined in [`CONTEXT.md`](CONTEX
 | Module | Responsibility |
 |---|---|
 | `src/main.py` | Entry point: parse options → load `Settings` → configure logging → `build_agent` → `run_cli`. |
-| `src/cli/` | `cli_options` (argparse), `cli_app` (`run_cli`, exit codes), `repl`, `question_session` (one question: progress, answer, error, Ctrl-C), `trace_printer` + `tool_call_format` (live `[Plan]` / `[Tool: …]`), `answer_printer` (answer, Sources, notes), `question_answerer` (the port the CLI needs). |
-| `src/agent.py` | `ResearchAgent.answer(question) -> AgentResult`: planner, then the tool-use loop. |
+| `src/cli/` | `cli_options` (argparse), `cli_app` (`run_cli`, exit codes), `repl`, `question_session` (one question: progress, answer, error, Ctrl-C), `trace_printer` + `tool_call_format` (live `[Plan]` / `[Tool: …]` / `[Check] …`), `answer_printer` (answer, Sources, notes), `question_answerer` (the port the CLI needs). |
+| `src/agent.py` | `ResearchAgent.answer(question) -> AgentResult`: planner, the tool-use loop, and the evidence check with its one retry. |
 | `src/agent_factory.py` | Composition root: `build_agent(settings, force_rebuild, observer)`, `build_tool_registry(index, web_client)`. |
 | `src/tools/` | `registry` (`Tool`, `ToolOutput`, `ToolRegistry`), `search_filing`, `get_passage`, `tavily_search` (`web_search`), `calculator` + `arithmetic` (`calculate`), `argument_errors`, `passage_json`. |
 | `src/utils/` — Filing | `filing_layout`, `filing_blocks`, `html_text`, `table_renderer` (HTML → ordered text/table blocks with pages; tables → Markdown), `filing_parser` (→ Passages), `filing_items`, `passage`. |
 | `src/utils/` — index | `chunker`, `text_packer`, `table_card_builder`, `index_entry`, `filing_index_loader` (reuse/rebuild, 512-token guard), `filing_index_factory`, `filing_index` (hybrid search), `bm25_retriever`, `rank_fusion`, `passage_hit`, `cross_reference_resolver`, `resolved_reference`. |
-| `src/utils/` — agent | `planner`, `plan`, `citations` (`CitationRegistry`), `tool_result_citer`, `citation_format`, `cited_answer` (`CitationResolver`), `agent_result`, `agent_observer`, `prompts`, `config`, `logging_config`. |
+| `src/utils/` — agent | `planner`, `plan`, `evidence_reviewer`, `evidence_review` (`EvidenceReview`, `Gap`, `GapProblem`), `tool_evidence`, `citations` (`CitationRegistry`), `tool_result_citer`, `citation_format`, `cited_answer` (`CitationResolver`), `agent_result`, `agent_observer`, `prompts`, `config`, `logging_config`. |
 
 ### Ports and adapters
 
@@ -400,14 +433,14 @@ injected at the composition root. Tests use the in-memory fakes in `tests/fakes/
 
 | Port (Protocol) | Used by | Production implementation | Test double |
 |---|---|---|---|
-| `ChatModel` (`utils/chat_model.py`): `generate_json`, `respond` | `Planner`, `ResearchAgent` | `AnthropicChatModel` | `ScriptedChatModel` |
+| `ChatModel` (`utils/chat_model.py`): `generate_json`, `respond` | `Planner`, `EvidenceReviewer`, `ResearchAgent` | `AnthropicChatModel` | `ScriptedChatModel` |
 | `WebSearchClient` (`utils/web_search.py`): `search` | `WebSearchTool` | `TavilyWebSearchClient` | `ScriptedWebSearchClient` |
 | `FilingSearch` (`utils/filing_search.py`): `items`, `search` | `SearchFilingTool` | `FilingIndex` | the real `FilingIndex` over `InMemoryIndexStore` |
 | `IndexStore` (`utils/index_store.py`): `fingerprint`, `replace`, `entries`, `nearest` | `FilingIndexLoader`, `FilingIndex` | `ChromaIndexStore` | `InMemoryIndexStore` |
 | `Embedder` (`utils/embedder.py`): `embed_documents`, `embed_query` | loader, `FilingIndex` | `FastEmbedEmbedder` | `ConstantEmbedder`, `CountingEmbedder` (spy) |
 | `TokenCounter` (`utils/token_counter.py`): `count_tokens` | `TextPacker`, 512-token guard | `FastEmbedEmbedder` (untruncated tokenizer) | — |
 | `Tool` (`tools/registry.py`) | `ToolRegistry` | the four tools | — |
-| `AgentObserver` (`utils/agent_observer.py`): `on_plan`, `on_tool_call` | `ResearchAgent` | `TracePrinter` (CLI) | `SilentObserver` |
+| `AgentObserver` (`utils/agent_observer.py`): `on_plan`, `on_tool_call`, `on_evidence_check` | `ResearchAgent` | `TracePrinter` (CLI) | `SilentObserver` |
 | `QuestionAnswerer` (`cli/question_answerer.py`): `answer` | CLI | `ResearchAgent` | stub agents in `test_cli.py` |
 
 ### Data model
@@ -502,6 +535,16 @@ propagates as `ChatModelError`.
 | Retries | Anthropic SDK `max_retries = 3` (connection errors, 408, 409, 429, 5xx, with backoff) |
 | Failures | API failure after retries, refusal, or a final turn with no text → `ChatModelError` with a one-line, key-free message; tool failures are `is_error` results the model works around |
 | Ctrl-C | an interrupted round shuts its pool down without waiting for in-flight calls |
+| Evidence check | runs on a text-only turn while tool rounds remain and no retry has been used; gaps → the `evidence_retry.txt` turn and the loop continues; at most `MAX_EVIDENCE_RETRIES = 1` per question; never after the round budget is spent |
+
+**Evidence check** (`utils/evidence_reviewer.py`). One structured-output call
+(`generate_json`, schema `EvidenceReview.json_schema()`) with `evidence_check_prompt.txt`. The
+user turn holds `<question>`, `<plan>`, `<evidence>` and `<draft_answer>`. `<evidence>` has one
+`<tool_call round name>` block per call, with its arguments and the cited result as the
+executor saw it. `EvidenceReview` rejects a `sufficient` flag that contradicts its `gaps`. Any
+failure (API error after retries, refusal, cut-off JSON, invalid review) logs a warning and
+returns an `EvidenceCheck` with no review. The draft is then the answer (`[Check] unavailable —
+keeping the draft answer`). The check never fails a run.
 
 **Citations** (`citations.py`, `tool_result_citer.py`, `cited_answer.py`).
 
@@ -520,7 +563,9 @@ propagates as `ChatModelError`.
 
 **`AgentResult`** (`agent_result.py`, frozen): `question`, `plan`, `trace` (tuple of
 `ToolCallRecord`: `round`, `name`, `args`, `output`, `is_error`, `citation_ids`), `answer`
-(`CitedAnswer`: `body`, `sources`, `text`), `hit_round_limit`, `answer_truncated`.
+(`CitedAnswer`: `body`, `sources`, `text`), `hit_round_limit`, `answer_truncated`,
+`evidence_checks` (tuple of `EvidenceCheck`: `review` — an `EvidenceReview`, or `None` when the
+check failed).
 
 ### CLI
 
@@ -530,7 +575,7 @@ propagates as `ChatModelError`.
 |---|---|
 | *(none)* | Interactive prompt `> `; `exit` / `quit` (any case), Ctrl-D or Ctrl-C at the prompt leaves. |
 | `--query QUESTION` | Answer once and exit. An empty question is a usage error. |
-| `--quiet` | No progress line, plan or trace. stdout: only answers and Sources. Prompt, notes and errors: stderr. |
+| `--quiet` | No progress line, plan, trace or `[Check]` lines. stdout: only answers and Sources. Prompt, notes and errors: stderr. |
 | `--rebuild-index` | Rebuild the Filing index before starting, even if it is current. |
 
 | Exit status | When |
@@ -587,7 +632,7 @@ Two tiers ([ADR-0004](docs/adr/0004-hybrid-test-tiers-and-ci.md)):
 
 | Tier | Where | Count | Runtime | Covers |
 |---|---|---|---|---|
-| Offline | `tests/offline/` | 160 | ~20–45 s locally (≈ 21 s of it embedding the Filing once per session); +~10 s the first time for the model download | parser (13), hybrid index and rebuild rules (8), `calculate` incl. attack cases (25), citations (5), `web_search` incl. key-leak check (17), Anthropic adapter error mapping (9), agent loop over a scripted model (21), CLI (40), prompts and settings (10), the live switch (12) |
+| Offline | `tests/offline/` | 181 | ~20–70 s locally (≈ 21 s of it embedding the Filing once per session); +~10 s the first time for the model download | parser (13), hybrid index and rebuild rules (8), `calculate` incl. attack cases (25), citations (5), `web_search` incl. key-leak check (17), Anthropic adapter error mapping (9), agent loop and evidence check over a scripted model (37), CLI (45), prompts and settings (10), the live switch (12) |
 | Live | `tests/test_queries.py` | 2 | ~40–55 s (one agent run per query) | the two required queries end to end against Anthropic and Tavily (see [the checks above](#how-to-run-the-test-queries)) |
 
 Fixtures in `tests/conftest.py` parse and embed the Filing once per session, caching the model
@@ -607,10 +652,15 @@ Measured on a developer laptop (CPU only); sources in brackets.
 | First run in a fresh clone: model download (~6 s) + index build (~19 s) + Query 1 | 53 s | fresh-clone check, PR for #12 |
 | Query 1 end to end | 13–14 s (6 tool calls, 2 rounds) | `docs/query-run-results.md`, PR #27 |
 | Query 2 end to end | 25–38 s (~10 tool calls, 3–4 rounds) | `docs/query-run-results.md`, PR #27 |
-| Live suite (both queries) | 42 s | PR #27 |
+| Query 2 with an evidence-check retry | ~50 s (~15 tool calls, 6–7 rounds) | `docs/query-run-results.md`, PR for #29 |
+| Live suite (both queries) | 42 s; 66 s with a Query 2 evidence-check retry | PR #27; PR for #29 |
+| Evidence check | one extra model call per question; a retry adds the tool rounds and executor turns it uses (Query 2: 2–3 more rounds) | PR for #29 |
 | `calculate` | < 0.5 ms per expression | PR #18 |
 
-Token usage per run has not been recorded yet (the evaluation suite, #26, adds it);
+Cost: the evidence check adds one `generate_json` call per question. Its input is the whole
+cited evidence, so it is about as large as the executor's last turn. A retry adds its own
+rounds on top. Query 1 normally passes the check with no retry. Token usage per run has not
+been recorded yet (the evaluation suite, #26, adds it);
 `LOG_LEVEL=DEBUG` logs input/output tokens per model call.
 
 ---
@@ -654,14 +704,16 @@ All four optional bonuses from the assignment:
 
 From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.md):
 
-1. **Microsoft's company-wide gross margin is not reliably found.** Tavily has not returned
-   Microsoft's own earnings release or 10-Q for its latest quarter. Depending on the run, the
-   agent either uses a secondary aggregator's figure (labelled as secondary, with its period
-   and "date unknown") or reports that only the Microsoft Cloud *segment* margin was found and
-   declines to present it as company-wide — so the comparison itself can go unanswered. The
-   Apple half is always correct. **Possible remedy (not yet decided):** a second,
-   primary-sources-only search using Tavily's `include_domains` (e.g. `microsoft.com`,
-   `sec.gov`), or steering queries to investor-relations pages.
+1. **Microsoft's company-wide gross margin still rarely comes from Microsoft itself.** The
+   evidence check (ADR-0006) catches a segment, secondary or missing figure and sends the agent
+   back with model-written guidance: find the earnings release or 10-Q, or find revenue and cost
+   of revenue and compute the margin with `calculate`. It triggered a retry in all three #29
+   Query 2 runs. In one, the retry produced a company-wide figure computed from components
+   (67.8%). In another it found none and the answer named the gap. In the third, an earlier
+   version of the check prompt, the retry ran into the round limit. In none of the runs did
+   Tavily (finance topic, 5 snippets) return Microsoft's own release or income statement, so
+   the inputs stay secondary and the answer says so. The Apple half is always correct. A
+   page-fetch tool would let the model read the release it finds (Future work).
 2. **Period mismatch.** Apple's figure is its full fiscal year to September 2025; Microsoft's
    "current" figure is a later fiscal year or quarter. The agent states the mismatch but does
    not align the periods.
@@ -674,7 +726,8 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
    compare two years of filings. Replacing the Filing triggers a re-index automatically.
 6. **"Top N" risk factors** are the first N listed in Item 1A, since the 10-K does not rank
    them; the answer says so.
-7. **No token or cost accounting** yet.
+7. **No token or cost accounting** yet. The evidence check adds one model call per question,
+   and a retry adds more (see [Performance](#performance)).
 
 ---
 
@@ -684,7 +737,9 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
   queries, the segment-vs-company-wide margin trap, the "top N" caveat, a cross-reference and an
   unanswerable question) scored by deterministic checks, run by hand with
   `python src/run_evals.py`, reporting tokens per phase and comparing with a committed baseline.
-- **Primary-source web search** for competitor figures (limitation 1).
+- **A page-fetch tool** so the executor can read a release or 10-Q that a search result only
+  links to (limitation 1). The evidence check already asks for such sources; the search
+  snippets lack the income-statement tables.
 - **Better retrieval recall** if needed: `bge-base-en-v1.5` is the documented upgrade
   (ADR-0002); swapping models is a re-index.
 - **XBRL facts** as Table Card metadata or a fact tool, if a wrong figure is traced to table
@@ -704,27 +759,28 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
 ├── pyproject.toml            ruff + pytest configuration
 ├── .env.example              every setting, documented
 ├── data/apple_10k_2025.htm   the Filing (FY2025, accession 0000320193-25-000079)
-├── prompts/                  system_prompt, planner_prompt, tool_descriptions, round_limit (.txt)
+├── prompts/                  system_prompt, planner_prompt, tool_descriptions, round_limit,
+│                             evidence_check_prompt, evidence_retry (.txt)
 ├── src/
 │   ├── main.py               entry point
-│   ├── agent.py              ResearchAgent: planner + tool-use loop
+│   ├── agent.py              ResearchAgent: planner + tool-use loop + evidence check
 │   ├── agent_factory.py      composition root: build_agent, build_tool_registry
 │   ├── cli/                  options, REPL, question session, trace and answer printers
 │   ├── tools/                Tool protocol + registry; search_filing, get_passage, web_search, calculate
 │   └── utils/                config, prompts, logging; Filing parser; chunker + hybrid index;
 │                             ports and adapters (Anthropic, Tavily, Chroma, fastembed);
-│                             planner; citation registry, formatter and resolver
+│                             planner, evidence reviewer; citation registry, formatter and resolver
 ├── tests/
 │   ├── conftest.py           session fixtures (parsed Filing, built index), RUN_LIVE_TESTS gate
 │   ├── live_switch.py        the RUN_LIVE_TESTS switch and key checks
 │   ├── fakes/                in-memory port fakes
-│   ├── offline/              offline tier (160 tests)
+│   ├── offline/              offline tier (181 tests)
 │   └── test_queries.py       live tier: the two required queries
 ├── docs/
 │   ├── TASKS.md              the assignment brief
 │   ├── query-run-results.md  recorded runs of both queries (example outputs)
 │   ├── handover.md           project status, team process, open items
-│   ├── adr/                  architecture decision records 0001–0004
+│   ├── adr/                  architecture decision records 0001–0004, 0006
 │   ├── coding-instructions.md, backend-python-instructions.md   code standards
 ├── .github/workflows/        ci.yml, live-tests.yml, claude-review.yml
 ├── .claude/                  Claude Code agents and skills (/implement-issue, /implement-milestone)
@@ -739,6 +795,7 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
 | [0002](docs/adr/0002-local-embeddings-and-passage-retrieval.md) | Local fastembed embeddings + BM25 hybrid retrieval over Passages; 350-token entries; fail on > 512 tokens. |
 | [0003](docs/adr/0003-no-xbrl-fact-tool.md) | No XBRL fact tool: figures come from rendered tables, arithmetic from `calculate`. |
 | [0004](docs/adr/0004-hybrid-test-tiers-and-ci.md) | Two test tiers: offline tests in CI on every PR; live query tests only with `RUN_LIVE_TESTS=true`. |
+| [0006](docs/adr/0006-model-driven-evidence-check.md) | A model-driven evidence check judges the draft's evidence and may send the executor back once with model-written retry guidance. |
 
 Smaller decisions (hand-written agent loop, structured-output planner, code-assigned citation
 IDs, the 8-round cap) are recorded in the bodies of issues #8 and #9.

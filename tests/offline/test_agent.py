@@ -7,6 +7,7 @@ assert which tools a real model would choose (ADR-0004); the live tier does that
 
 import json
 import os
+import re
 import signal
 import threading
 import time
@@ -23,10 +24,11 @@ from fakes.scripted_chat_model import ScriptedChatModel, text_reply, tool_reply
 from fakes.scripted_web_search_client import ScriptedWebSearchClient
 from tools.calculator import CalculateTool
 from tools.registry import ToolOutput, ToolRegistry
-from utils.agent_result import ToolCallRecord
+from utils.agent_result import EvidenceCheck, ToolCallRecord
 from utils.chat_model import ChatModelError, ChatModelRefusalError, IncompleteReplyError, ModelReply
 from utils.citation_format import CitationFormatter
 from utils.cited_answer import CitationResolver
+from utils.evidence_review import EvidenceReview
 from utils.filing_index import FilingIndex
 from utils.passage import Passage, PassageKind
 from utils.plan import Plan
@@ -98,13 +100,16 @@ class _Recorder:
     """An `AgentObserver` that records events in order."""
 
     def __init__(self) -> None:
-        self.events: list[Plan | ToolCallRecord] = []
+        self.events: list[Plan | ToolCallRecord | EvidenceCheck] = []
 
     def on_plan(self, plan: Plan) -> None:
         self.events.append(plan)
 
     def on_tool_call(self, record: ToolCallRecord) -> None:
         self.events.append(record)
+
+    def on_evidence_check(self, check: EvidenceCheck) -> None:
+        self.events.append(check)
 
 
 def _registry(*tools: _StaticTool | CalculateTool) -> ToolRegistry:
@@ -409,3 +414,179 @@ def test_wired_tools_cite_the_income_statement_for_rd_expense(filing_index: Fili
     assert result.answer.sources[0].startswith(
         "10-K FY2025 — Item 8 > CONSOLIDATED STATEMENTS OF OPERATIONS"
     )
+
+
+# --- The evidence check (#29) ----------------------------------------------------------------
+
+_GAP = {
+    "requirement": "Company-wide gross margin, latest quarter",
+    "problem": "segment_not_company_wide",
+    "retry_guidance": "Search the latest earnings release for revenue and cost of revenue.",
+}
+_GAP_REVIEW = json.dumps({"gaps": [_GAP], "sufficient": False})
+_SUFFICIENT_REVIEW = '{"gaps": [], "sufficient": true}'
+
+
+def _web_tool() -> _StaticTool:
+    return _StaticTool("web_search", ToolOutput(content='{"found": 1}', sources=(_WEB,)))
+
+
+def test_sufficient_evidence_answers_at_once_without_another_round() -> None:
+    observer = _Recorder()
+    model = ScriptedChatModel(
+        [tool_reply(("web_search", {"query": "margin"})), text_reply("69% [W1].")],
+        reviews=[_SUFFICIENT_REVIEW],
+    )
+
+    result = _agent(model, _registry(_web_tool()), observer).answer("question")
+
+    assert len(model.respond_calls) == 2
+    assert len(model.review_requests) == 1
+    assert result.answer.body == "69% [1]."
+    [check] = result.evidence_checks
+    assert check.review is not None and check.review.sufficient
+    assert observer.events[-1] == check
+
+
+def test_the_check_sees_the_question_plan_cited_evidence_and_draft() -> None:
+    model = ScriptedChatModel(
+        [tool_reply(("web_search", {"query": "margin"})), text_reply("69% [W1].")],
+        plan_json=_PLAN.model_dump_json(),
+        reviews=[_SUFFICIENT_REVIEW],
+    )
+
+    _agent(model, _registry(_web_tool())).answer("What is the margin?")
+
+    [(system, prompt, schema)] = model.review_requests
+    assert "2026-11-03" in system and "fiscal year 2025" in system and "web_search" in system
+    assert "<question>\nWhat is the margin?\n</question>" in prompt
+    assert "1. search_filing — Find R&D expense in Item 8." in prompt
+    assert '<tool_call round="1" name="web_search">' in prompt
+    assert '<arguments>{"query": "margin"}</arguments>' in prompt
+    assert "[W1] Microsoft earnings — https://www.microsoft.com/en-us/investor" in prompt
+    assert "<draft_answer>\n69% [W1].\n</draft_answer>" in prompt
+    assert schema == EvidenceReview.json_schema()
+
+
+def test_gaps_go_back_to_the_model_and_tools_are_allowed_again() -> None:
+    observer = _Recorder()
+    model = ScriptedChatModel(
+        [
+            tool_reply(("web_search", {"query": "margin"})),
+            text_reply("Only a segment margin was found [W1]."),
+            tool_reply(("web_search", {"query": "earnings release revenue cost of revenue"})),
+            text_reply("Company-wide margin [W1]."),
+        ],
+        reviews=[_GAP_REVIEW],
+    )
+
+    result = _agent(model, _registry(_web_tool()), observer).answer("question")
+
+    retry_call = model.respond_calls[2]
+    assert retry_call.allow_tool_calls
+    retry_turn = retry_call.messages[-1]
+    assert retry_turn["role"] == "user"
+    assert retry_turn["content"].startswith("An evidence check of your draft answer found")
+    assert (
+        "1. Company-wide gross margin, latest quarter (segment_not_company_wide). Next: Search "
+        "the latest earnings release for revenue and cost of revenue."
+    ) in retry_turn["content"]
+    assert f"You have {MAX_TOOL_ROUNDS - 1} tool rounds left" in retry_turn["content"]
+    assert [record.round for record in result.trace] == [1, 2]
+    assert result.answer.body == "Company-wide margin [1]."
+    [check] = result.evidence_checks
+    assert check.found_gaps
+    assert [type(event) for event in observer.events] == [
+        Plan,
+        ToolCallRecord,
+        EvidenceCheck,
+        ToolCallRecord,
+    ]
+
+
+def test_only_one_retry_per_question() -> None:
+    # The fake fails the test on a second evidence check: only one review is scripted.
+    model = ScriptedChatModel(
+        [text_reply("Draft."), tool_reply(("calculate", {"expression": "1 + 1"})), text_reply("2")],
+        reviews=[_GAP_REVIEW],
+    )
+    result = _agent(model, _registry(CalculateTool())).answer("question")
+    assert len(model.review_requests) == 1
+    assert result.answer.body == "2"
+
+
+def test_a_retry_with_no_further_tool_use_returns_the_new_answer() -> None:
+    model = ScriptedChatModel(
+        [text_reply("Draft."), text_reply("Still nothing; the margin is missing.")],
+        reviews=[_GAP_REVIEW],
+    )
+    result = _agent(model, _registry(CalculateTool())).answer("question")
+    assert result.answer.body == "Still nothing; the margin is missing."
+    assert result.trace == ()
+
+
+@pytest.mark.parametrize(
+    "review",
+    [
+        ChatModelError("Anthropic API returned HTTP 529."),
+        ChatModelRefusalError("declined"),
+        IncompleteReplyError("no complete JSON"),
+        "not json",
+        '{"gaps": [], "sufficient": false}',
+        json.dumps({"gaps": [_GAP], "sufficient": True}),
+        json.dumps({"gaps": [{**_GAP, "problem": "unknown"}], "sufficient": False}),
+    ],
+    ids=[
+        "api-error",
+        "refusal",
+        "incomplete",
+        "not-json",
+        "insufficient-without-gaps",
+        "sufficient-with-gaps",
+        "unknown-problem",
+    ],
+)
+def test_a_failed_check_keeps_the_draft(review: str | ChatModelError) -> None:
+    observer = _Recorder()
+    model = ScriptedChatModel([text_reply("Draft answer.")], reviews=[review])
+    result = _agent(model, _registry(CalculateTool()), observer).answer("question")
+    assert result.answer.body == "Draft answer."
+    assert len(model.respond_calls) == 1
+    [check] = result.evidence_checks
+    assert check.failed
+    assert observer.events[-1] == check
+
+
+def test_no_check_once_the_round_budget_is_spent() -> None:
+    calculate = ("calculate", {"expression": "1 + 1"})
+    model = ScriptedChatModel(
+        [tool_reply(calculate)] * MAX_TOOL_ROUNDS + [text_reply("Partial.")], reviews=[]
+    )
+    result = _agent(model, _registry(CalculateTool())).answer("question")
+    assert model.review_requests == []
+    assert result.evidence_checks == ()
+    assert result.hit_round_limit
+
+
+def test_retry_rounds_share_the_round_budget() -> None:
+    calculate = ("calculate", {"expression": "1 + 1"})
+    model = ScriptedChatModel(
+        [tool_reply(calculate)] * (MAX_TOOL_ROUNDS - 1)
+        + [text_reply("Draft."), tool_reply(calculate), text_reply("Final.")],
+        reviews=[_GAP_REVIEW],
+    )
+
+    result = _agent(model, _registry(CalculateTool())).answer("question")
+
+    assert len(result.trace) == MAX_TOOL_ROUNDS
+    assert model.respond_calls[-1].allow_tool_calls is False
+    last_turn = model.respond_calls[-1].messages[-1]["content"]
+    assert last_turn[-1] == {"type": "text", "text": load_prompt("round_limit").strip()}
+    assert result.answer.body == "Final."
+    assert result.hit_round_limit
+
+
+@pytest.mark.parametrize("name", ["evidence_check_prompt", "evidence_retry"])
+def test_evidence_prompts_name_no_source_or_competitor(name: str) -> None:
+    text = load_prompt(name).lower()
+    assert not re.search(r"https?://|www\.|\.com\b|\.org\b|microsoft|macrotrends|yahoo", text)

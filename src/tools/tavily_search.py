@@ -32,7 +32,7 @@ class WebSearchArgs(BaseModel):
         max_length=MAX_QUERY_LENGTH,
         description=(
             "A specific search query naming the company, the metric and the period, "
-            'e.g. "Microsoft gross margin latest quarter".'
+            'e.g. "<company> gross margin latest quarter".'
         ),
     )
 
