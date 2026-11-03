@@ -18,6 +18,8 @@ DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5"
 DEFAULT_FILING_PATH = "data/apple_10k_2025.htm"
 DEFAULT_INDEX_DIR = ".index"
 DEFAULT_LOG_LEVEL = "INFO"
+# The fiscal year of the shipped Filing (DEFAULT_FILING_PATH): Apple's FY2025 10-K.
+DEFAULT_FILING_FISCAL_YEAR = "2025"
 
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
@@ -45,6 +47,7 @@ class Settings:
     tavily_api_key: str = field(repr=False)
     anthropic_model: str
     filing_path: Path
+    filing_fiscal_year: int
     index_dir: Path
     log_level: str
 
@@ -68,6 +71,9 @@ class Settings:
             tavily_api_key=_required(values, "TAVILY_API_KEY"),
             anthropic_model=_optional(values, "ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_MODEL),
             filing_path=_project_path(_optional(values, "FILING_PATH", DEFAULT_FILING_PATH)),
+            filing_fiscal_year=_fiscal_year(
+                _optional(values, "FILING_FISCAL_YEAR", DEFAULT_FILING_FISCAL_YEAR)
+            ),
             index_dir=_project_path(_optional(values, "INDEX_DIR", DEFAULT_INDEX_DIR)),
             log_level=_log_level(_optional(values, "LOG_LEVEL", DEFAULT_LOG_LEVEL)),
         )
@@ -105,3 +111,12 @@ def _log_level(raw: str) -> str:
     if level not in _LOG_LEVELS:
         raise ConfigError(f"LOG_LEVEL must be one of {', '.join(_LOG_LEVELS)}; got {raw!r}.")
     return level
+
+
+def _fiscal_year(raw: str) -> int:
+    """A four-digit fiscal year, e.g. `2025`."""
+    if not (len(raw) == 4 and raw.isdigit() and raw[0] != "0"):
+        raise ConfigError(
+            f"FILING_FISCAL_YEAR must be a four-digit year such as 2025; got {raw!r}."
+        )
+    return int(raw)

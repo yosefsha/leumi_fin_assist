@@ -15,9 +15,10 @@ import requests
 from fakes.scripted_web_search_client import ScriptedWebSearchClient
 from tools.tavily_search import WebSearchTool
 from utils.tavily_web_search_client import TavilyWebSearchClient
-from utils.web_search import WebSearchError, WebSearchResult, WebSearchTimeoutError
+from utils.web_result import WebResult
+from utils.web_search import WebSearchError, WebSearchTimeoutError
 
-_RESULT = WebSearchResult(
+_RESULT = WebResult(
     url="https://www.microsoft.com/investor",
     title="Microsoft FY26 Q1 earnings",
     content="Gross margin was 69%.",
@@ -27,14 +28,12 @@ _QUERY = {"query": "Microsoft gross margin latest quarter"}
 _FAKE_KEY = "tvly-offline-test-key-0123456789"
 
 
-def test_results_are_returned_as_json() -> None:
+def test_results_are_returned_as_sources() -> None:
     client = ScriptedWebSearchClient([[_RESULT]])
     output = WebSearchTool(client).run(_QUERY)
     assert not output.is_error
-    body = json.loads(output.content)
-    assert body["query"] == _QUERY["query"]
-    assert body["results"][0]["url"] == _RESULT.url
-    assert body["results"][0]["published_date"] == "2025-10-29"
+    assert json.loads(output.content) == {"query": _QUERY["query"], "results_found": 1}
+    assert output.sources == (_RESULT,)
 
 
 def test_a_timeout_is_retried_exactly_once() -> None:

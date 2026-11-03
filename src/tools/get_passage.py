@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from tools.argument_errors import invalid_arguments_output
-from tools.passage_json import passage_outline_json, passage_to_json
+from tools.passage_json import passage_outline_json
 from tools.registry import ToolOutput
 from utils.cross_reference_resolver import CrossReferenceResolver, UnknownReferenceError
 from utils.prompts import load_tool_description
@@ -34,8 +34,9 @@ class GetPassageArgs(BaseModel):
 class GetPassageTool:
     """Resolves a cross-reference to its Passage through an injected `CrossReferenceResolver`.
 
-    Returns the Passage and an outline of the Passages nested under it (a Note's
-    tables, an Item's subsections). An unresolvable reference is an error result
+    The Passage is the result's one source; `content` is an outline of the
+    Passages nested under it (a Note's tables, an Item's subsections), to fetch
+    by `passage_id`. An unresolvable reference is an error result
     that lists the accepted forms.
     """
 
@@ -57,7 +58,7 @@ class GetPassageTool:
         return self._input_schema
 
     def run(self, args: Mapping[str, Any]) -> ToolOutput:
-        """Resolve `args["reference"]`; return the Passage and its related Passages as JSON."""
+        """Resolve `args["reference"]`; the Passage is the source, nested Passages the content."""
         try:
             reference = GetPassageArgs.model_validate(args).reference
         except ValidationError as error:
@@ -70,7 +71,8 @@ class GetPassageTool:
 
         result = {
             "reference": reference,
-            "passage": passage_to_json(resolved.passage),
             "related": [passage_outline_json(passage) for passage in resolved.related],
         }
-        return ToolOutput(content=json.dumps(result, ensure_ascii=False))
+        return ToolOutput(
+            content=json.dumps(result, ensure_ascii=False), sources=(resolved.passage,)
+        )

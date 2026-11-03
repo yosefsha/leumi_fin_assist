@@ -1,20 +1,8 @@
-"""How the Document QA tools show a Passage to the model."""
+"""How `get_passage` lists the Passages related to the one it returns."""
 
 from typing import Any
 
 from utils.passage import Passage, PassageKind
-
-
-def passage_to_json(passage: Passage) -> dict[str, Any]:
-    """The whole Passage: its ID, location and Markdown content."""
-    return {
-        "passage_id": passage.passage_id,
-        "section_path": passage.section_path_text,
-        "page": passage.page,
-        "page_approximate": passage.page_approximate,
-        "kind": passage.kind.value,
-        "content": passage.content,
-    }
 
 
 def passage_outline_json(passage: Passage) -> dict[str, Any]:

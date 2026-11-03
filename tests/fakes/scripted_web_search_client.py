@@ -2,9 +2,10 @@
 
 from collections.abc import Iterable
 
-from utils.web_search import WebSearchError, WebSearchResult
+from utils.web_result import WebResult
+from utils.web_search import WebSearchError
 
-type Outcome = list[WebSearchResult] | WebSearchError
+type Outcome = list[WebResult] | WebSearchError
 
 
 class ScriptedWebSearchClient:
@@ -18,7 +19,7 @@ class ScriptedWebSearchClient:
         self._outcomes = list(outcomes)
         self.queries: list[str] = []
 
-    def search(self, query: str) -> list[WebSearchResult]:
+    def search(self, query: str) -> list[WebResult]:
         self.queries.append(query)
         if not self._outcomes:
             raise AssertionError(f"Unexpected extra search for {query!r}.")
