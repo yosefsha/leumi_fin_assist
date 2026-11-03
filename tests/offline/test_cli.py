@@ -1,12 +1,17 @@
-"""The CLI's deterministic behaviour (issue #10): the REPL, flags, trace lines and errors.
+"""The CLI's deterministic behaviour (issues #10, #31): the REPL and its menu, the arguments,
+trace lines and errors.
 
 The agent is the real `ResearchAgent` over a scripted `ChatModel` (or a stub for
 interrupts and caveats), so these tests check what the CLI prints and returns, not
 which tools a real model would choose (ADR-0004).
 """
 
+import importlib
 import io
 import logging
+import subprocess
+import sys
+import tomllib
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import date
 from pathlib import Path
@@ -18,7 +23,6 @@ import main as main_module
 from agent import ResearchAgent
 from cli.answer_printer import NO_SOURCES, ROUND_LIMIT_NOTICE, TRUNCATED_NOTICE
 from cli.cli_app import (
-    BANNER,
     EXIT_CONFIG_ERROR,
     EXIT_FAILURE,
     EXIT_INTERRUPTED,
@@ -27,8 +31,10 @@ from cli.cli_app import (
     trace_observer,
 )
 from cli.cli_options import CliOptions, parse_cli_args
+from cli.menu import Menu
 from cli.question_session import CANCELLED_LINE, PROCESSING_LINE
-from cli.repl import PROMPT
+from cli.repl import PROMPT, QUESTION_LABEL
+from cli.suggested_questions import SuggestedQuestions, load_suggested_questions
 from cli.tool_call_format import describe_outcome
 from cli.trace_printer import TracePrinter, describe_check
 from fakes.scripted_chat_model import Outcome, ScriptedChatModel, text_reply, tool_reply
@@ -40,7 +46,7 @@ from utils.agent_result import AgentResult, EvidenceCheck, ToolCallRecord
 from utils.chat_model import ChatModelError
 from utils.citation_format import CitationFormatter
 from utils.cited_answer import CitationResolver, CitedAnswer
-from utils.config import Settings
+from utils.config import DEFAULT_ENV_FILE, DEFAULT_FILING_PATH, PROJECT_ROOT, Settings
 from utils.embedder import EmbedderError
 from utils.evidence_review import EvidenceReview
 from utils.logging_config import LibraryNoiseFilter, configure_logging
@@ -64,6 +70,16 @@ _SEARCH = ("search_filing", {"query": "research and development expense", "item"
 _CALCULATE = ("calculate", {"expression": "34550 / 416161 * 100"})
 _ANSWER = "R&D was 8.3% of net sales [F1]."
 _SOURCE_LINE = "10-K FY2025 — Item 8 > CONSOLIDATED STATEMENTS OF OPERATIONS, p. 29"
+_SUGGESTIONS = SuggestedQuestions(("First suggestion?", "Second suggestion?"))
+_MENU = Menu("Test assistant", _SUGGESTIONS)
+_WELCOME = (
+    "Test assistant\n"
+    "Try one of these, or type your own question:\n"
+    "  1) First suggestion?\n"
+    "  2) Second suggestion?\n"
+    "Type a number, a question, 'help' to show this list again, or 'exit' to quit.\n"
+)
+_LISTING = _WELCOME.removeprefix("Test assistant\n")
 
 
 class _SearchTool:
@@ -139,7 +155,7 @@ def _run(
     out, err = io.StringIO(), io.StringIO()
     if not isinstance(agent, _StubAgent):
         agent = agent(trace_observer(options, out))
-    status = run_cli(options, agent, read_line or _lines(), out, err)
+    status = run_cli(options, agent, read_line or _lines(), out, err, _MENU)
     return status, out.getvalue(), err.getvalue()
 
 
@@ -157,8 +173,8 @@ def _record(name: str, args: Mapping[str, Any], output: str = "", is_error: bool
 @pytest.mark.parametrize("command", ["exit", "quit", "  EXIT ", "Quit"])
 def test_exit_commands_leave_with_status_zero_without_asking(command: str) -> None:
     agent = _StubAgent(error=AssertionError("not asked"))
-    status, _, err = _run(CliOptions(), agent, _lines(command, "never read"))
-    assert (status, agent.questions, err) == (EXIT_OK, [], "")
+    status, out, err = _run(CliOptions(), agent, _lines(command, "never read"))
+    assert (status, agent.questions, out, err) == (EXIT_OK, [], _WELCOME, "")
 
 
 @pytest.mark.parametrize("key", [EOFError, KeyboardInterrupt], ids=["ctrl-d", "ctrl-c"])
@@ -166,7 +182,7 @@ def test_ctrl_d_or_ctrl_c_at_the_prompt_leaves_cleanly(key: type[BaseException])
     agent = _StubAgent(error=AssertionError("not asked"))
     status, out, err = _run(CliOptions(), agent, _lines("", key, "never read"))
     assert (status, agent.questions, err) == (EXIT_OK, [], "")
-    assert out == f"{BANNER}\n\n"  # the banner, then a newline that ends the prompt's line
+    assert out == f"{_WELCOME}\n"  # the menu, then a newline that ends the prompt's line
 
 
 def test_quiet_repl_keeps_the_prompt_and_separators_off_stdout() -> None:
@@ -174,7 +190,7 @@ def test_quiet_repl_keeps_the_prompt_and_separators_off_stdout() -> None:
     status, out, err = _run(CliOptions(quiet=True), agent, _lines("one", "two"))
     assert status == EXIT_OK
     assert out == f"Hi.\n\n{NO_SOURCES}\n" * 2
-    assert err == f"{PROMPT}\n{PROMPT}\n{PROMPT}\n"
+    assert err == f"{_WELCOME}{PROMPT}\n{PROMPT}\n{PROMPT}\n"
 
 
 def test_ctrl_c_while_the_answer_prints_cancels_only_that_question() -> None:
@@ -186,7 +202,7 @@ def test_ctrl_c_while_the_answer_prints_cancels_only_that_question() -> None:
 
     agent = _StubAgent(result=_result(CitedAnswer(body="Hi.", sources=())))
     out, err = _InterruptingOut(), io.StringIO()
-    status = run_cli(CliOptions(), agent, _lines("one", "two"), out, err)
+    status = run_cli(CliOptions(), agent, _lines("one", "two"), out, err, _MENU)
     assert (status, agent.questions) == (EXIT_OK, ["one", "two"])
     assert err.getvalue() == f"{CANCELLED_LINE}\n{CANCELLED_LINE}\n"
 
@@ -208,7 +224,7 @@ def test_a_question_prints_progress_plan_trace_answer_and_sources_in_order() -> 
     assert status == EXIT_OK
     assert err == ""
     assert out == (
-        f"{BANNER}\n"
+        f"{_WELCOME}"
         f"{PROCESSING_LINE}\n"
         "[Plan] 1) search_filing — Find R&D expense in Item 8.\n"
         "       2) calculate — R&D as a share of net sales.\n"
@@ -254,6 +270,67 @@ def test_ctrl_c_while_answering_cancels_the_question_and_returns_to_the_prompt()
     assert err == f"{CANCELLED_LINE}\n{CANCELLED_LINE}\n"
 
 
+# --- The menu of suggested questions --------------------------------------------------------
+
+
+def test_a_number_at_the_prompt_echoes_and_asks_that_suggestion() -> None:
+    agent = _StubAgent(result=_result(CitedAnswer(body="Hi.", sources=())))
+    status, out, err = _run(CliOptions(), agent, _lines(" 2 "))
+    assert (status, agent.questions, err) == (EXIT_OK, ["Second suggestion?"], "")
+    assert out.startswith(f"{_WELCOME}{QUESTION_LABEL}Second suggestion?\n{PROCESSING_LINE}\n")
+
+
+def test_free_text_at_the_prompt_is_asked_as_typed_without_an_echo() -> None:
+    agent = _StubAgent(result=_result(CitedAnswer(body="Hi.", sources=())))
+    _, out, _ = _run(CliOptions(), agent, _lines("What is 2 + 2?"))
+    assert agent.questions == ["What is 2 + 2?"]
+    assert QUESTION_LABEL not in out
+
+
+@pytest.mark.parametrize("number", ["0", "3", "42"])
+def test_an_out_of_range_number_gets_one_line_and_the_menu_is_not_reprinted(number: str) -> None:
+    agent = _StubAgent(error=AssertionError("not asked"))
+    status, out, _ = _run(CliOptions(), agent, _lines(number))
+    assert (status, agent.questions) == (EXIT_OK, [])
+    assert out == (
+        f"{_WELCOME}There is no suggestion {int(number)}: choose a number from 1 to 2. "
+        "Type 'help' to see the list.\n\n"
+    )
+
+
+@pytest.mark.parametrize("command", ["help", "?", " HELP "])
+def test_help_shows_the_suggestions_again(command: str) -> None:
+    agent = _StubAgent(error=AssertionError("not asked"))
+    status, out, _ = _run(CliOptions(), agent, _lines(command))
+    assert (status, agent.questions) == (EXIT_OK, [])
+    assert out == f"{_WELCOME}{_LISTING}\n"
+
+
+def test_quiet_menu_and_echo_go_to_stderr() -> None:
+    agent = _StubAgent(result=_result(CitedAnswer(body="Hi.", sources=())))
+    _, out, err = _run(CliOptions(quiet=True), agent, _lines("1"))
+    assert out == f"Hi.\n\n{NO_SOURCES}\n"
+    assert err.startswith(f"{_WELCOME}{PROMPT}{QUESTION_LABEL}First suggestion?\n")
+
+
+def test_a_question_picked_by_number_is_echoed_before_a_single_shot_answer() -> None:
+    agent = _StubAgent(result=_result(CitedAnswer(body="Hi.", sources=())))
+    options = CliOptions(query="First suggestion?", announce_query=True)
+    status, out, _ = _run(options, agent)
+    assert status == EXIT_OK
+    assert out.startswith(f"{QUESTION_LABEL}First suggestion?\n{PROCESSING_LINE}\n")
+
+
+def test_suggestions_file_skips_comments_and_blank_lines() -> None:
+    text = "# heading\n\nFirst?\n  # indented comment\n  Second?  \n"
+    assert SuggestedQuestions.parse(text).questions == ("First?", "Second?")
+
+
+def test_an_empty_suggestions_file_is_rejected() -> None:
+    with pytest.raises(ValueError, match="no suggested questions"):
+        SuggestedQuestions.parse("# only a comment\n")
+
+
 # --- Single shot (--query) and --quiet -------------------------------------------------------
 
 
@@ -264,12 +341,12 @@ def test_quiet_query_prints_only_the_answer_and_sources() -> None:
     assert out == (f"R&D was 8.3% of net sales [1].\n\nSources:\n[1] {_SOURCE_LINE}\n")
 
 
-def test_query_without_quiet_shows_the_trace_but_no_banner() -> None:
+def test_query_without_quiet_shows_the_trace_but_no_menu() -> None:
     build = _scripted_builder([text_reply("Done.")], plan_json='{"steps": []}')
     status, out, _ = _run(CliOptions(query="q"), build)
     assert status == EXIT_OK
     assert out.startswith(f"{PROCESSING_LINE}\n[Plan] none — working from the question alone\n")
-    assert BANNER not in out
+    assert "Test assistant" not in out
 
 
 _GAP_REVIEW = (
@@ -405,17 +482,49 @@ def test_trace_printer_writes_each_event_as_it_arrives() -> None:
 
 
 def test_options_default_to_the_interactive_prompt() -> None:
-    assert parse_cli_args([]) == CliOptions(quiet=False, rebuild_index=False, query=None)
-    assert parse_cli_args(["--query", "  hi ", "--quiet", "--rebuild-index"]) == CliOptions(
+    assert parse_cli_args(_SUGGESTIONS, []) == CliOptions(
+        quiet=False, rebuild_index=False, query=None
+    )
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["  hi ", "--quiet", "--rebuild-index"], ["--query", "  hi ", "--quiet", "--rebuild-index"]],
+    ids=["positional", "query-alias"],
+)
+def test_a_question_comes_as_an_argument_or_with_query(argv: list[str]) -> None:
+    assert parse_cli_args(_SUGGESTIONS, argv) == CliOptions(
         quiet=True, rebuild_index=True, query="hi"
     )
 
 
-@pytest.mark.parametrize("argv", [["--query", "  "], ["--verbose"], ["question"]])
+@pytest.mark.parametrize("argv", [["2"], ["--query", " 2 "]], ids=["positional", "query-alias"])
+def test_a_number_argument_runs_that_suggestion(argv: list[str]) -> None:
+    assert parse_cli_args(_SUGGESTIONS, argv) == CliOptions(
+        query="Second suggestion?", announce_query=True
+    )
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["--query", "  "], ["  "], ["--verbose"], ["one", "two"], ["q", "--query", "q"], ["3"], ["0"]],
+)
 def test_invalid_usage_exits_with_status_2(argv: list[str]) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        parse_cli_args(argv)
+        parse_cli_args(_SUGGESTIONS, argv)
     assert exit_info.value.code == 2
+
+
+def test_help_lists_the_usage_forms_and_the_suggestions(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        parse_cli_args(_SUGGESTIONS, ["--help"])
+    help_text = capsys.readouterr().out
+    assert exit_info.value.code == 0
+    for form in ("finassist ", 'finassist "QUESTION"', "finassist 1", "--quiet", "--rebuild-index"):
+        assert form in help_text
+    assert "  1) First suggestion?\n  2) Second suggestion?\n" in help_text
 
 
 def test_missing_api_key_is_one_startup_line_naming_the_variable(
@@ -459,6 +568,21 @@ def _main_with_agent(monkeypatch: pytest.MonkeyPatch, agent: _StubAgent, argv: l
     monkeypatch.setattr(main_module, "configure_logging", lambda level: None)
     settings = Settings.from_mapping({"ANTHROPIC_API_KEY": "a", "TAVILY_API_KEY": "t"})
     return main(argv, load_settings=lambda: settings)
+
+
+@pytest.mark.parametrize("argv", [["q"], ["--query", "q"]], ids=["positional", "query-alias"])
+@pytest.mark.parametrize(
+    ("agent", "status"),
+    [
+        (_StubAgent(result=_result(CitedAnswer(body="Hi.", sources=()))), EXIT_OK),
+        (_StubAgent(error=ChatModelError("down")), EXIT_FAILURE),
+    ],
+    ids=["answered", "api-failure"],
+)
+def test_a_positional_question_exits_like_query(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], agent: _StubAgent, status: int
+) -> None:
+    assert _main_with_agent(monkeypatch, agent, argv) == status
 
 
 def test_a_cancelled_query_exits_130_at_once_without_waiting_for_tool_threads(
@@ -517,3 +641,49 @@ def test_debug_shows_library_records_too() -> None:
     assert not any(
         isinstance(f, LibraryNoiseFilter) for h in logging.getLogger().handlers for f in h.filters
     )
+
+
+# --- The finassist command, from any directory ----------------------------------------------
+
+
+def test_the_shipped_suggestions_start_with_the_two_assignment_queries() -> None:
+    questions = load_suggested_questions().questions
+    assert questions[0].startswith("What are Apple's top 3 risk factors")
+    assert questions[1].startswith("How does Apple's gross margin compare to Microsoft's")
+    assert len(questions) >= 6  # Filing-only, web-only, cross-reference and calculation too
+
+
+def test_finassist_is_declared_as_the_main_function() -> None:
+    with (PROJECT_ROOT / "pyproject.toml").open("rb") as pyproject:
+        scripts = tomllib.load(pyproject)["project"]["scripts"]
+    module, _, function = scripts["finassist"].partition(":")
+    assert getattr(importlib.import_module(module), function) is main
+
+
+def test_files_resolve_against_the_project_root_from_another_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    settings = Settings.from_mapping(
+        {"ANTHROPIC_API_KEY": "a", "TAVILY_API_KEY": "t", "INDEX_DIR": ".index"}
+    )
+    assert settings.filing_path == PROJECT_ROOT / DEFAULT_FILING_PATH
+    assert settings.filing_path.is_file()
+    assert settings.index_dir == PROJECT_ROOT / ".index"
+    assert DEFAULT_ENV_FILE == PROJECT_ROOT / ".env"
+    assert load_suggested_questions().questions  # prompts/ is found too
+
+
+def test_main_py_runs_from_another_directory(tmp_path: Path) -> None:
+    """`python src/main.py --help` (what `finassist --help` runs) needs no keys and no CWD."""
+    completed = subprocess.run(
+        [sys.executable, str(PROJECT_ROOT / "src" / "main.py"), "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert (completed.returncode, completed.stderr) == (0, "")
+    assert "usage: finassist" in completed.stdout
+    assert "  1) What are Apple's top 3 risk factors" in completed.stdout

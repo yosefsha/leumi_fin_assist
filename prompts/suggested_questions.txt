@@ -1,0 +1,16 @@
+# Suggested questions: the interactive menu lists them, and `finassist <number>` runs one.
+# One question per line, numbered from 1 in this order; blank lines and lines starting
+# with "#" are ignored. Keep the two assignment test queries (docs/TASKS.md) first, so
+# `finassist 1` and `finassist 2` stay the documented way to run them.
+
+# 1-2. The assignment's test queries: Filing + calculation, and Filing + web.
+What are Apple's top 3 risk factors mentioned in their latest 10-K, and what percentage of total revenue did they spend on R&D?
+How does Apple's gross margin compare to Microsoft's current gross margin, and what reasons does Apple cite in their 10-K for any margin pressure?
+# 3. Filing only.
+How did Apple's net sales by category (iPhone, Mac, iPad, Wearables, Services) change in fiscal 2025?
+# 4. Web only.
+What is Apple's current stock price?
+# 5. Cross-reference: a Note of the financial statements.
+What does Note 7 of Apple's 10-K say about its income taxes and effective tax rate?
+# 6. Calculation over Filing figures.
+By what percentage did Apple's Services net sales grow from fiscal 2024 to fiscal 2025?

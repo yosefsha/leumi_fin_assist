@@ -38,8 +38,15 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt ruff
+      - name: Install dependencies and the finassist command
+        run: |
+          pip install -r requirements.txt ruff
+          pip install -e .
+
+      # The installed command starts and finds its prompts from outside the project.
+      - name: Smoke-test the finassist command
+        working-directory: ${{ runner.temp }}
+        run: finassist --help
 
       - name: Lint
         run: ruff check .

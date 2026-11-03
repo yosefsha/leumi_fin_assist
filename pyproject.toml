@@ -1,4 +1,31 @@
-# Tool configuration only; dependencies live in requirements.txt.
+# Packaging for the `finassist` command, and tool configuration. Dependencies are
+# read from requirements.txt, the one list of them.
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finassist"
+version = "0.1.0"
+description = "Financial research agent over Apple's 10-K and live web search, with citations."
+readme = "README.md"
+requires-python = ">=3.12"
+dynamic = ["dependencies"]
+
+[project.scripts]
+finassist = "main:main"
+
+# The code runs from src/ as top-level modules (`python src/main.py`), so the
+# package maps src/ as-is. Install it editable (`pip install -e .`): the agent reads
+# prompts/, data/ and .env from the project root next to src/.
+[tool.setuptools]
+package-dir = { "" = "src" }
+py-modules = ["main", "agent", "agent_factory"]
+packages = ["cli", "tools", "utils"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
 
 [tool.ruff]
 line-length = 100
