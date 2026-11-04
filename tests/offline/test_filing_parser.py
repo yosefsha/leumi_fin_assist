@@ -68,6 +68,15 @@ def test_page_numbers_never_decrease(passages: tuple[Passage, ...]) -> None:
     assert pages == sorted(pages)
 
 
+def test_every_apple_footer_is_confirmed_so_only_the_cover_lacks_a_page(
+    passages: tuple[Passage, ...],
+) -> None:
+    """Footer agreement (#35) must not drop any of Apple's `… Form 10-K | N` footers."""
+    unnumbered = {p.item for p in passages if p.page is None}
+    assert unnumbered == {"Front Matter"}
+    assert not any(p.page_approximate for p in passages)
+
+
 def test_notes_1_to_13_are_one_passage_each(passages: tuple[Passage, ...]) -> None:
     notes = [p for p in passages if p.kind is PassageKind.NOTE]
     numbers = [int(_NOTE_NUMBER.match(note.section_path[-1]).group(1)) for note in notes]
