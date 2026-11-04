@@ -670,7 +670,9 @@ repository root, so the working directory does not matter. API keys are excluded
 
 ### Using another company's 10-K
 
-No code change is needed. Download the 10-K's main HTML document from SEC EDGAR (the
+No code change is needed to switch, but the parser has only been verified on Apple's Filing.
+On Microsoft's 10-K it misses Item 1, most risk factors and the Notes, and the file must first be
+converted to UTF-8 (see [Known limitations](#known-limitations), item 7). Download the 10-K's main HTML document from SEC EDGAR (the
 `<ticker>-<period>.htm` file in the filing index; EDGAR requires a descriptive `User-Agent`
 header on scripted downloads), save it under `data/` (or anywhere), and set in `.env`:
 
@@ -850,6 +852,22 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
    formatted in ways it does not recognise (see
    [Using another company's 10-K](#using-another-companys-10-k)). The live tests and the
    recorded runs cover Apple only.
+
+   **Checked on Microsoft's FY2026 10-K** (accession `0001193125-26-323660`, 2026-11-04,
+   parser only, no paid runs):
+
+   | Check | Apple FY2025 | Microsoft FY2026 |
+   |---|---|---|
+   | File loads | ✅ | ❌ The file is windows-1252 (declared in its `<meta charset>`); the parser reads UTF-8 only and stops with `FilingParseError`. The rows below come from a copy converted to UTF-8 by hand. |
+   | Page numbers | ✅ | ✅ 198 of 206 Passages, pp. 2–101 |
+   | Items | all | Item 1 (Business) is not detected; its text lands in "Front Matter". Items 9, 9A, 12–14 and 16 are also missing. Items 1A, 7, 7A and 8 are found. |
+   | Risk factors | one Passage per risk factor | 3 Passages. Microsoft groups about 40 risks under topic headings ("Competition", "Business model"), and almost all of them land in one 76 KB Passage. |
+   | Notes | 13 | 0. Microsoft heads its Notes `NOTE 1 — ACCOUNTING POLICIES`, which the parser does not recognise; their sub-headings become flat Item 8 sections and `get_passage("Note 5")` fails. |
+   | Financial statements and tables | ✅ | ✅ The income statement, balance sheet, cash flows and 88 tables are parsed. |
+
+   For another filer, questions answered from the financial tables (revenue, R&D, gross margin)
+   should work. "Top N risk factors", Note cross-references and Item 1 questions are
+   unreliable until the parser is generalised (Future work).
 8. **"Top N" risk factors** are the first N listed in Item 1A, since the 10-K does not rank
    them; the answer says so.
 9. **No token or cost accounting** yet. The evidence check adds one model call per question,
@@ -871,6 +889,12 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
 - **XBRL facts** as Table Card metadata or a fact tool, if a wrong figure is traced to table
   rendering (ADR-0003).
 - **Streaming output** and prompt caching for lower latency and cost.
+- **Generalise the Filing parser beyond Apple's layout** (limitation 7), about a day:
+  - Decode the Filing with its declared charset, falling back to windows-1252.
+  - Detect Item headings in more styles (Microsoft's Item 1).
+  - Split risk factors that sit under topic headings into one Passage each.
+  - Recognise `NOTE n — TITLE` Note headings.
+  - Add Microsoft's 10-K as a parse fixture, plus two paid runs on it.
 - **Several filings at once** (backlog issue #36): index more than one 10-K and answer
   cross-year and cross-company questions from filings, with each citation naming its
   company and fiscal year.
