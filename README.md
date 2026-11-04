@@ -283,7 +283,12 @@ Sources:
 [4] 10-K FY2025 — Item 8 > CONSOLIDATED STATEMENTS OF OPERATIONS, p. 29
 ```
 
-### Query 2 — document + web (25–38 s, about 10 tool calls in 3–4 rounds; about 50 s with an evidence-check retry)
+### Query 2 — document + web (25–38 s, about 10 tool calls in 3–4 rounds; about 50–63 s with an evidence-check retry)
+
+The Microsoft half varies between runs because it depends on what web search returns. This excerpt
+is an earlier run that found a secondary company-wide figure. The
+[latest recorded run](docs/query-run-results.md#2026-11-04-query-2-on-current-main) found none, so
+it gave only a rough comparison against Microsoft Cloud's segment margin and said so.
 
 ```
 [Plan] 1) search_filing — Search Item 8 for 'total net sales' and 'gross margin' …

@@ -136,7 +136,7 @@ PLAN:
 
 ### Answer
 
-Condensed: the risk-factor list is shortened here. The full text is in the PR #24 description.
+Condensed: the risk-factor list is shortened here. The full text is in the PR #24 description. A later run is recorded uncondensed in [2026-11-04: Query 2 on current `main`](#2026-11-04-query-2-on-current-main).
 
 ```
 Apple's gross margin is about 20 to 21 percentage points below Microsoft's. I could not find Microsoft's
@@ -315,3 +315,109 @@ Query 2 run four times by hand with `python src/main.py --query "$Q" | tee <file
 The prompts now read "Apple Inc." where they read "Apple"/"Apple's" before (`{{company}}`); the answer was the same as the recorded Query 1 runs.
 
 **Second company: not run.** SEC EDGAR returned HTTP 403 to both scripted download attempts of Microsoft's FY2026 10-K (accession `0001193125-26-323660`, filed 2026-07-29), even with a descriptive `User-Agent`, so the parser findings and the two live questions on a second Filing are still to do. The document is <https://www.sec.gov/Archives/edgar/data/789019/000119312526323660/msft-20260630.htm>. Footer handling for other filers is covered offline by a synthetic Filing instead (`tests/offline/test_filing_parser.py`): `Form 10-K` footers with other separators, bare page numbers, a page break on a `div`, a stray figure ending a page, footers that disagree, and no footers at all (no page, never a guessed one).
+
+## 2026-11-04: Query 2 on current `main`
+
+Query 2 had no recorded run since the prompts began naming the configured company (#35), so it was re-run once. This is the complete output, unedited.
+
+| | |
+|---|---|
+| Code | `main` at `00ac65b` |
+| Model | `claude-sonnet-5-5` |
+| Command | `python src/main.py "<query 2>"`, stdout and stderr saved separately |
+| Result | Exit 0 in 63 s, reusing the stored index (259 Index Entries). stderr held only that log line |
+| Tools | 16 calls: `search_filing` ×3, `web_search` ×11, `calculate` ×2 |
+| Evidence check | 2 gaps (`missing`, `secondary_source`) → one retry of 5 searches. No round-limit note in the answer |
+| Sources | 14: 8 Filing, 6 web |
+
+### Output
+
+```
+[Agent processing...]
+[Plan] 1) search_filing — Search Item 8 with query 'total net sales' and 'gross margin' (statement of operations line items) for Apple's fiscal 2025 total net sales and total gross margin dollars, plus products and services figures.
+       2) search_filing — Search Item 7 with query 'gross margin percentage' (and 'products gross margin', 'services gross margin') to get Apple's reported fiscal 2025 gross margin percentages and management's stated drivers of margin pressure such as tariffs, product mix, foreign exchange, and costs.
+       3) search_filing — Search Item 1A with query 'gross margin could be adversely affected' / 'tariffs, foreign exchange, component costs, pricing pressure' (top_k around 5) to capture the risk factors Apple cites for gross margin pressure.
+       4) calculate — Compute Apple's fiscal 2025 gross margin percentage as gross margin divided by total net sales times 100 to verify the reported percentage.
+       5) web_search — Find Microsoft's latest reported quarterly (and fiscal year) revenue and cost of revenue or gross margin from its earnings release or SEC filing, as of today (Nov 2026), likely fiscal 2027 Q1 ended September 30, 2026, stating the period clearly.
+       6) calculate — If Microsoft's gross margin percentage is not stated, compute (revenue - cost of revenue) / revenue * 100, then compute the percentage-point difference between Apple's and Microsoft's gross margins.
+[Tool: search_filing(item="7") "gross margin percentage products services"]
+[Tool: search_filing(item="8") "total net sales, total gross margin, cost of sales"]
+[Tool: search_filing(item="1A") "gross margin could be adversely affected tariffs foreign exchange component costs"]
+[Tool: web_search "Microsoft fiscal year 2027 first quarter results September 30, 2026 revenue cost of revenue gross margin"]
+[Tool: web_search "Microsoft Q1 FY27 gross margin dollars gross margin percentage increased cost of revenue earnings call"]
+[Tool: web_search "Microsoft Reports First Quarter Fiscal Year 2027 results income statement total cost of revenue gross margin"]
+[Tool: web_search "Microsoft gross margin percentage quarter ended September 30, 2026 Amy Hood \"gross margin\""]
+[Tool: web_search "microsoft.com investor FY27 Q1 income statements revenue total cost of revenue gross margin operating income $45.9 bill…"]
+[Tool: web_search "Microsoft fiscal year 2026 annual results total revenue $329 billion cost of revenue gross margin 10-K"]
+[Tool: calculate] 195201 / 416161 * 100 = 46.90516410716045
+[Check] 2 gaps: Microsoft latest company-wide gross margin (Q1 FY27, quarter ended Sept 30, 2026, or FY2026): revenue and cost of revenue — missing; Microsoft Q1 FY27 revenue and operating income, dated and from primary source — secondary_source → retrying
+[Tool: web_search "Microsoft Cloud Strength Drives First Quarter Results fiscal year 2027"]
+[Tool: web_search "Microsoft 10-Q September 30 2026 gross margin total cost of revenue"]
+[Tool: web_search "Microsoft FY27 Q1 Income Statements microsoft.com investor"]
+[Tool: web_search "Microsoft MSFT gross profit trailing twelve months gross margin % 2026"]
+[Tool: web_search "Microsoft Q1 FY27 earnings call transcript Amy Hood \"cost of revenue\" \"gross margin dollars\""]
+[Tool: calculate] 66 - 46.9 = 19.1
+
+**Bottom line:** I could not find Microsoft's company-wide gross margin, so I can't give a like-for-like comparison. Apple's FY2025 gross margin was 46.9%. The only Microsoft margin I found is a segment figure, Microsoft Cloud at about 66%, which is higher than Apple's. I did not find Microsoft's own earnings release or 10-Q, so everything below on Microsoft comes from secondary sources.
+
+## Apple (FY2025, year ended Sept 27, 2025)
+- Gross margin was $195,201M on total net sales of $416,161M [1]. That is 195,201 / 416,161 = 46.9%, which matches the 46.9% Apple reports [2].
+- By category, Products was 36.8% and Services was 75.4% [2]. The total was 46.2% in FY2024 [2].
+
+## Microsoft (current)
+- **Quarter:** Microsoft's fiscal Q1 2027 ended Sept 30, 2026. Revenue was $92.3B, up 19% [3]. Operating income rose 21% to $45.9B [4]. Operating margin was 50% [5]. All dates are "date unknown", and these are secondary summaries (Yahoo, Zacks, Verdict). I could not confirm them against Microsoft's press release or 10-Q.
+- **Segment margin:** For Q1 FY27, Microsoft Cloud's gross margin percentage was 66%. It fell year over year because of a sales mix shift toward Azure [5]. This is a segment metric, not Microsoft's company-wide margin.
+- **Unverified figures:** Two secondary articles say Microsoft's "gross margin was 67% in fiscal Q4 2026" [6][7]. They don't say whether that is company-wide or Microsoft Cloud, so I haven't used it as a company-wide number. A third secondary source gave Microsoft Cloud's gross margin as 68% for fiscal Q1 2026 [8].
+- **Missing inputs:** No result gave total cost of revenue or gross margin dollars for Microsoft for Q1 FY27 or for fiscal 2026. Without them I couldn't calculate the company-wide percentage.
+
+**Indicative comparison only:** Microsoft Cloud's 66% (Q1 FY27, secondary source) less Apple's 46.9% (FY2025) is 19.1 percentage points. Microsoft Cloud is a segment and the periods differ, so treat this as a rough guide, not a true gap between the two companies. A like-for-like figure needs Microsoft's total revenue and total cost of revenue from its income statement.
+
+## Why Apple says its gross margin faces pressure
+Apple says its gross margins "will be subject to volatility and downward pressure" [9]. The reasons fall into two groups.
+
+**FY2025 drivers named in MD&A**
+- **Products:** The gross margin percentage fell from 37.2% to 36.8%. Apple attributes this mainly to a different mix of products and to tariff costs, partly offset by other favorable costs [10][2].
+- **Services:** The percentage rose, helped by a different mix of services and partly offset by higher costs [9].
+
+**Risk factors**
+- **General factors:** Apple lists these [11]:
+  - global product pricing pressures;
+  - increased competition;
+  - the ability to stimulate demand;
+  - compressed product life cycles;
+  - supply shortages;
+  - higher component, manufacturing and content costs;
+  - product quality and warranty costs;
+  - shifts in product, service, geographic, currency or channel mix, including mix changes forced by regulation;
+  - foreign exchange;
+  - inflation;
+  - new or increased tariffs and trade restrictions;
+  - new products with lower margins;
+  - dependence on a single product category.
+- **Foreign exchange:** A weaker foreign currency cuts the dollar value of foreign sales. Apple may choose not to raise international prices to offset it. A stronger foreign currency can raise component costs. Hedging may not offset these effects [12].
+- **Tariffs and trade:** New U.S. tariffs began in Q2 FY2025, with retaliatory measures and a Section 232 semiconductor investigation under way. Apple says the ultimate impact is uncertain [13].
+- **Components:** Apple relies on single or limited sources for components, so it faces supply and pricing risk, including commodity price swings [14].
+
+Sources:
+[1] 10-K FY2025 — Item 8 > CONSOLIDATED STATEMENTS OF OPERATIONS, p. 29
+[2] 10-K FY2025 — Item 7 > Gross Margin, p. 24
+[3] Microsoft Q1 Earnings Beat Estimates as Cloud Accelerates — https://finance.yahoo.com/markets/stocks/articles/microsoft-q1-earnings-beat-estimates-143700741.html (date unknown)
+[4] Microsoft posts 32% rise in Q1 FY27 net income to $36.6bn — https://finance.yahoo.com/news/microsoft-posts-32-rise-q1-082820492.html (date unknown)
+[5] Microsoft Corp (MSFT) (Q1 2027) Earnings Call Highlights: Cloud Growth Accelerates to 30% as ... — https://finance.yahoo.com/markets/stocks/articles/microsoft-corp-msft-q1-2027-070906310.html (date unknown)
+[6] Can Microsoft Stock Keep Earning Like This? — https://finance.yahoo.com/markets/stocks/articles/microsoft-stock-keep-earning-195439759.html (date unknown)
+[7] Microsoft Stock Facing Margin Pressures — https://www.forbes.com/sites/greatspeculations/2026/08/10/microsoft-stock-facing-margin-pressures (date unknown)
+[8] Microsoft Q1 Earnings & Revenues Beat on Cloud, AI Strength — https://finance.yahoo.com/news/microsoft-q1-earnings-revenues-beat-181100634.html (date unknown)
+[9] 10-K FY2025 — Item 7 > Gross Margin > Services Gross Margin, p. 24
+[10] 10-K FY2025 — Item 7 > Gross Margin > Products Gross Margin, p. 24
+[11] 10-K FY2025 — Item 1A > Financial Risks > The Company’s net sales and gross margins are subject to volatility and downward pressure due to a variety of factors., p. 15
+[12] 10-K FY2025 — Item 1A > Financial Risks > The Company’s financial performance is subject to risks associated with changes in the value of the U.S. dollar relative to local currencies., p. 15
+[13] 10-K FY2025 — Item 1A > Macroeconomic and Industry Risks > The Company’s business can be impacted by political events, trade and other international disputes, geopolitical tensions, conflict, terrorism, natural disasters, public health issues, industrial accidents and other business interruptions., p. 6
+[14] 10-K FY2025 — Item 1A > Business Risks > Future operating results depend upon the Company’s ability to obtain components in sufficient quantities on commercially reasonable terms., p. 8
+```
+
+### Notes
+
+- **Checked against the Filing:** $195,201M, $416,161M, 46.9%, 46.2%, 36.8%, 37.2%, 75.4%, the Products and Services drivers, and the quote in the opening line of the pressure section all match Item 7. The Microsoft figures and web pages were not independently checked.
+- **One wording slip:** the answer says new U.S. tariffs "began" in Q2 FY2025. The Filing says they "were announced" beginning in the second quarter of 2025.
+- **The comparison remains unanswered.** No Microsoft company-wide figure was found, and none of the 11 searches led to a cited Microsoft release or 10-Q. The agent declined to use the 67% figure because its sources don't say what it covers. The earlier "After 1" run reported 67.9%, so this outcome also shows the run-to-run variation in weakness 4.
+- **The 19.1-point figure compares a segment with a whole company.** The answer labels it as indicative only and says it is not a true gap, so the segment figure isn't presented as company-wide. It still gives a reader a number that isn't like for like.
