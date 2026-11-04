@@ -10,8 +10,10 @@ from cli.suggested_questions import SuggestedQuestions, is_number_choice
 PROG = "finassist"
 HELP_WIDTH = 79
 
+GENERIC_FILER = "a company"
+"""Who `--help` says the Filing belongs to when the settings cannot be loaded."""
 DESCRIPTION = (
-    "Answer questions about Apple's 10-K filing and the live web, with citations. "
+    "Answer questions about {filer}'s 10-K filing and the live web, with citations. "
     "Without a question, starts an interactive prompt that lists suggested questions "
     "(type a number or your own question; 'help' shows the list again; 'exit' or 'quit', "
     "or Ctrl-D, leaves; Ctrl-C cancels a running question)."
@@ -48,14 +50,17 @@ class CliOptions:
 
 
 def parse_cli_args(
-    suggestions: SuggestedQuestions, argv: Sequence[str] | None = None
+    suggestions: SuggestedQuestions,
+    argv: Sequence[str] | None = None,
+    company: str | None = None,
 ) -> CliOptions:
     """Parse `argv` (default: `sys.argv[1:]`); invalid usage exits with status 2.
 
     The question comes as a positional argument or, equivalently, `--query`. A
-    question that is only a number runs that suggested question.
+    question that is only a number runs that suggested question. `--help` names
+    `company` as the filer, or "a company" when it is `None` (settings not loaded).
     """
-    parser = _parser(suggestions)
+    parser = _parser(suggestions, company)
     namespace = parser.parse_args(argv)
     if namespace.question is not None and namespace.query is not None:
         parser.error("give the question once: as an argument or with --query, not both")
@@ -71,10 +76,11 @@ def parse_cli_args(
     )
 
 
-def _parser(suggestions: SuggestedQuestions) -> argparse.ArgumentParser:
+def _parser(suggestions: SuggestedQuestions, company: str | None) -> argparse.ArgumentParser:
+    description = DESCRIPTION.format(filer=company or GENERIC_FILER)
     parser = argparse.ArgumentParser(
         prog=PROG,
-        description=f"{textwrap.fill(DESCRIPTION, HELP_WIDTH)}\n\n{SAME_AS_MAIN}",
+        description=f"{textwrap.fill(description, HELP_WIDTH)}\n\n{SAME_AS_MAIN}",
         epilog=_epilog(suggestions),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

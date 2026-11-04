@@ -45,9 +45,9 @@ class WebSearchTool:
     an error `ToolOutput` with a short reason; no exception reaches the agent.
     """
 
-    def __init__(self, client: WebSearchClient) -> None:
+    def __init__(self, client: WebSearchClient, company: str) -> None:
         self._client = client
-        self._description = load_tool_description(TOOL_NAME)
+        self._description = load_tool_description(TOOL_NAME, {"company": company})
         self._input_schema: dict[str, Any] = WebSearchArgs.model_json_schema()
 
     @property

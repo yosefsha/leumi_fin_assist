@@ -61,9 +61,9 @@ class SearchFilingTool:
     error results. A search that finds nothing is a normal result that says so.
     """
 
-    def __init__(self, search: FilingSearch) -> None:
+    def __init__(self, search: FilingSearch, company: str) -> None:
         self._search = search
-        self._description = load_tool_description(TOOL_NAME)
+        self._description = load_tool_description(TOOL_NAME, {"company": company})
         self._input_schema: dict[str, Any] = SearchFilingArgs.model_json_schema()
 
     @property

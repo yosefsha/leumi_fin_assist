@@ -28,9 +28,10 @@ class EvidenceReviewer:
     `EvidenceCheck` with no review and a warning, so the draft answer stands.
     """
 
-    def __init__(self, model: ChatModel, fiscal_year: int) -> None:
+    def __init__(self, model: ChatModel, fiscal_year: int, company: str) -> None:
         self._model = model
         self._fiscal_year = fiscal_year
+        self._company = company
 
     def review(
         self,
@@ -45,6 +46,7 @@ class EvidenceReviewer:
         system = render_prompt(
             EVIDENCE_CHECK_PROMPT,
             {
+                "company": self._company,
                 "fiscal_year": str(self._fiscal_year),
                 "today": today.isoformat(),
                 "tools": ", ".join(tool_names),

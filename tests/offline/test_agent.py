@@ -120,7 +120,10 @@ def _registry(*tools: _StaticTool | CalculateTool) -> ToolRegistry:
 
 
 def _agent(
-    model: ScriptedChatModel, registry: ToolRegistry, observer: _Recorder | None = None
+    model: ScriptedChatModel,
+    registry: ToolRegistry,
+    observer: _Recorder | None = None,
+    company: str = "Apple Inc.",
 ) -> ResearchAgent:
     formatter = CitationFormatter(fiscal_year=2025)
     return ResearchAgent(
@@ -129,6 +132,7 @@ def _agent(
         citer=ToolResultCiter(formatter),
         resolver=CitationResolver(formatter),
         fiscal_year=2025,
+        company=company,
         observer=observer,
         today=lambda: date(2026, 11, 3),
     )
@@ -405,7 +409,7 @@ def test_wired_tools_cite_the_income_statement_for_rd_expense(filing_index: Fili
         ]
     )
 
-    result = _agent(model, build_tool_registry(filing_index, web)).answer("question")
+    result = _agent(model, build_tool_registry(filing_index, web, "Apple Inc.")).answer("question")
 
     search, web_result = _tool_results(model, 1)
     assert json.loads(search["content"].partition("\n\n")[0])["item"] == "Item 8"
@@ -590,3 +594,16 @@ def test_retry_rounds_share_the_round_budget() -> None:
 def test_evidence_prompts_name_no_source_or_competitor(name: str) -> None:
     text = load_prompt(name).lower()
     assert not re.search(r"https?://|www\.|\.com\b|\.org\b|microsoft|macrotrends|yahoo", text)
+
+
+def test_the_configured_company_reaches_the_planner_executor_and_evidence_check() -> None:
+    """Issue #35: the company is configuration, so no prompt the model sees names Apple."""
+    model = ScriptedChatModel([text_reply("2 + 2 = 4.")])
+
+    _agent(model, _registry(CalculateTool()), company="Contoso Ltd.").answer("question")
+
+    [(planner_system, _, _)] = model.json_requests
+    [(review_system, _, _)] = model.review_requests
+    for system in (planner_system, model.respond_calls[0].system, review_system):
+        assert "Contoso Ltd." in system
+        assert "Apple" not in system

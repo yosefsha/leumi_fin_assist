@@ -1,0 +1,16 @@
+# Suggested questions for a Filing other than the shipped one, when SUGGESTED_QUESTIONS_PATH
+# is not set: {{company}} is filled from FILING_COMPANY. Same format as
+# suggested_questions.txt: one question per line; blank lines and "#" lines are ignored.
+
+# 1. Filing + calculation.
+What are {{company}}'s top 3 risk factors mentioned in their latest 10-K, and what percentage of total revenue did they spend on R&D?
+# 2. Filing + web.
+How does {{company}}'s gross margin compare to its main competitor's current gross margin, and what reasons does {{company}} cite in their 10-K for any margin pressure?
+# 3. Filing only.
+How did {{company}}'s revenue by segment change in the fiscal year of its latest 10-K?
+# 4. Web only.
+What is {{company}}'s current stock price?
+# 5. Cross-reference: a Note of the financial statements.
+What does the income taxes Note of {{company}}'s 10-K say about its effective tax rate?
+# 6. Calculation over Filing figures.
+By what percentage did {{company}}'s total revenue grow from the prior fiscal year in its latest 10-K?

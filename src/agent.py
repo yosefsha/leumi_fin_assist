@@ -34,6 +34,9 @@ MAX_EVIDENCE_RETRIES = 1
 class ResearchAgent:
     """Answers one question at a time from the Filing and the web, with citations.
 
+    `company` and `fiscal_year` describe the Filing to the model: they fill the
+    `{{company}}` and `{{fiscal_year}}` placeholders of every prompt.
+
     1. The `Planner` proposes a Plan, reported to the observer before any tool runs.
     2. The executor converses with the model using the registry's tools. Every
        `tool_use` block of a turn runs concurrently and all results go back in one
@@ -63,6 +66,7 @@ class ResearchAgent:
         citer: ToolResultCiter,
         resolver: CitationResolver,
         fiscal_year: int,
+        company: str,
         observer: AgentObserver | None = None,
         today: Callable[[], date] = date.today,
     ) -> None:
@@ -71,8 +75,9 @@ class ResearchAgent:
         self._citer = citer
         self._resolver = resolver
         self._fiscal_year = fiscal_year
-        self._planner = Planner(model, fiscal_year)
-        self._reviewer = EvidenceReviewer(model, fiscal_year)
+        self._company = company
+        self._planner = Planner(model, fiscal_year, company)
+        self._reviewer = EvidenceReviewer(model, fiscal_year, company)
         self._observer = observer or SilentObserver()
         self._today = today
 
@@ -88,7 +93,12 @@ class ResearchAgent:
         self._observer.on_plan(plan)
 
         system = render_prompt(
-            SYSTEM_PROMPT, {"fiscal_year": str(self._fiscal_year), "today": today.isoformat()}
+            SYSTEM_PROMPT,
+            {
+                "company": self._company,
+                "fiscal_year": str(self._fiscal_year),
+                "today": today.isoformat(),
+            },
         )
         registry = CitationRegistry()
         messages: list[MessageParam] = [{"role": "user", "content": _task(question, plan)}]

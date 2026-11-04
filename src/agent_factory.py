@@ -32,22 +32,30 @@ def build_agent(
     receives the plan and each tool call as they happen.
     """
     index = open_filing_index(settings, force_rebuild=force_rebuild)
-    formatter = CitationFormatter(settings.filing_fiscal_year)
+    filing = settings.filing
+    formatter = CitationFormatter(filing.fiscal_year)
+    web_client = TavilyWebSearchClient(settings.tavily_api_key)
     return ResearchAgent(
         model=AnthropicChatModel(settings.anthropic_api_key, settings.anthropic_model),
-        tools=build_tool_registry(index, TavilyWebSearchClient(settings.tavily_api_key)),
+        tools=build_tool_registry(index, web_client, filing.company),
         citer=ToolResultCiter(formatter),
         resolver=CitationResolver(formatter),
-        fiscal_year=settings.filing_fiscal_year,
+        fiscal_year=filing.fiscal_year,
+        company=filing.company,
         observer=observer,
     )
 
 
-def build_tool_registry(index: FilingIndex, web_client: WebSearchClient) -> ToolRegistry:
-    """Register the agent's four tools over `index` and `web_client`."""
+def build_tool_registry(
+    index: FilingIndex, web_client: WebSearchClient, company: str
+) -> ToolRegistry:
+    """Register the agent's four tools over `index` and `web_client`.
+
+    `company` is the filer's name, written into the tool descriptions.
+    """
     registry = ToolRegistry()
-    registry.register(SearchFilingTool(index))
+    registry.register(SearchFilingTool(index, company))
     registry.register(GetPassageTool(CrossReferenceResolver(index.passages)))
-    registry.register(WebSearchTool(web_client))
+    registry.register(WebSearchTool(web_client, company))
     registry.register(CalculateTool())
     return registry

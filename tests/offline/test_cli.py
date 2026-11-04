@@ -1,5 +1,5 @@
-"""The CLI's deterministic behaviour (issues #10, #31): the REPL and its menu, the arguments,
-trace lines and errors.
+"""The CLI's deterministic behaviour (issues #10, #31, #35): the REPL and its menu, the
+arguments, trace lines and errors, and the configured company in the banner and `--help`.
 
 The agent is the real `ResearchAgent` over a scripted `ChatModel` (or a stub for
 interrupts and caveats), so these tests check what the CLI prints and returns, not
@@ -31,10 +31,14 @@ from cli.cli_app import (
     trace_observer,
 )
 from cli.cli_options import CliOptions, parse_cli_args
-from cli.menu import Menu
+from cli.menu import Menu, welcome_title
 from cli.question_session import CANCELLED_LINE, PROCESSING_LINE
 from cli.repl import PROMPT, QUESTION_LABEL
-from cli.suggested_questions import SuggestedQuestions, load_suggested_questions
+from cli.suggested_questions import (
+    SuggestedQuestions,
+    SuggestedQuestionsFileError,
+    load_suggested_questions,
+)
 from cli.tool_call_format import describe_outcome
 from cli.trace_printer import TracePrinter, describe_check
 from fakes.scripted_chat_model import Outcome, ScriptedChatModel, text_reply, tool_reply
@@ -46,7 +50,14 @@ from utils.agent_result import AgentResult, EvidenceCheck, ToolCallRecord
 from utils.chat_model import ChatModelError
 from utils.citation_format import CitationFormatter
 from utils.cited_answer import CitationResolver, CitedAnswer
-from utils.config import DEFAULT_ENV_FILE, DEFAULT_FILING_PATH, PROJECT_ROOT, Settings
+from utils.config import (
+    DEFAULT_ENV_FILE,
+    DEFAULT_FILING_PATH,
+    PROJECT_ROOT,
+    ConfigError,
+    FilingProfile,
+    Settings,
+)
 from utils.embedder import EmbedderError
 from utils.evidence_review import EvidenceReview
 from utils.logging_config import LibraryNoiseFilter, configure_logging
@@ -71,6 +82,14 @@ _CALCULATE = ("calculate", {"expression": "34550 / 416161 * 100"})
 _ANSWER = "R&D was 8.3% of net sales [F1]."
 _SOURCE_LINE = "10-K FY2025 — Item 8 > CONSOLIDATED STATEMENTS OF OPERATIONS, p. 29"
 _SUGGESTIONS = SuggestedQuestions(("First suggestion?", "Second suggestion?"))
+_APPLE_FILING = FilingProfile.from_mapping({})
+_OTHER_FILING = FilingProfile.from_mapping(
+    {
+        "FILING_PATH": "data/contoso_10k_2026.htm",
+        "FILING_COMPANY": "Contoso Ltd.",
+        "FILING_FISCAL_YEAR": "2026",
+    }
+)
 _MENU = Menu("Test assistant", _SUGGESTIONS)
 _WELCOME = (
     "Test assistant\n"
@@ -125,6 +144,7 @@ def _scripted_builder(
             citer=ToolResultCiter(formatter),
             resolver=CitationResolver(formatter),
             fiscal_year=2025,
+            company="Apple Inc.",
             observer=observer,
             today=lambda: date(2026, 11, 3),
         )
@@ -564,7 +584,11 @@ def test_unusable_suggestions_are_one_startup_line(
     if contents is not None:
         (tmp_path / "suggested_questions.txt").write_text(contents)
 
-    status = main(["--help"], load_suggestions=lambda: load_suggested_questions(tmp_path))
+    status = main(
+        ["--help"],
+        load_filing=lambda: _APPLE_FILING,
+        load_suggestions=lambda filing: load_suggested_questions(filing, tmp_path),
+    )
 
     captured = capsys.readouterr()
     assert (status, captured.out) == (EXIT_CONFIG_ERROR, "")
@@ -675,7 +699,7 @@ def test_debug_shows_library_records_too() -> None:
 
 
 def test_the_shipped_suggestions_start_with_the_two_assignment_queries() -> None:
-    questions = load_suggested_questions().questions
+    questions = load_suggested_questions(_APPLE_FILING).questions
     assert questions[0].startswith("What are Apple's top 3 risk factors")
     assert questions[1].startswith("How does Apple's gross margin compare to Microsoft's")
     assert len(questions) >= 6  # Filing-only, web-only, cross-reference and calculation too
@@ -695,11 +719,11 @@ def test_files_resolve_against_the_project_root_from_another_directory(
     settings = Settings.from_mapping(
         {"ANTHROPIC_API_KEY": "a", "TAVILY_API_KEY": "t", "INDEX_DIR": ".index"}
     )
-    assert settings.filing_path == PROJECT_ROOT / DEFAULT_FILING_PATH
-    assert settings.filing_path.is_file()
+    assert settings.filing.path == PROJECT_ROOT / DEFAULT_FILING_PATH
+    assert settings.filing.path.is_file()
     assert settings.index_dir == PROJECT_ROOT / ".index"
     assert DEFAULT_ENV_FILE == PROJECT_ROOT / ".env"
-    assert load_suggested_questions().questions  # prompts/ is found too
+    assert load_suggested_questions(settings.filing).questions  # prompts/ is found too
 
 
 def test_main_py_runs_from_another_directory(tmp_path: Path) -> None:
@@ -715,3 +739,86 @@ def test_main_py_runs_from_another_directory(tmp_path: Path) -> None:
     assert completed.returncode == 0, completed.stderr  # stderr may carry library import noise
     assert "usage: finassist" in completed.stdout
     assert "  1) What are Apple's top 3 risk factors" in completed.stdout
+
+
+# --- The configured company (issue #35) ------------------------------------------------------
+
+
+def test_the_banner_names_the_configured_company_and_fiscal_year() -> None:
+    assert welcome_title("Apple Inc.", 2025) == (
+        "Financial Research Assistant — Apple Inc. 10-K (FY2025) + web search"
+    )
+    assert "Contoso Ltd. 10-K (FY2026)" in welcome_title("Contoso Ltd.", 2026)
+
+
+@pytest.mark.parametrize(
+    ("company", "filer"),
+    [("Contoso Ltd.", "Contoso Ltd.'s 10-K"), (None, "a company's 10-K")],
+    ids=["configured", "settings-not-loaded"],
+)
+def test_help_names_the_configured_company_or_a_generic_one(
+    capsys: pytest.CaptureFixture[str], company: str | None, filer: str
+) -> None:
+    with pytest.raises(SystemExit):
+        parse_cli_args(_SUGGESTIONS, ["--help"], company)
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert f"Answer questions about {filer} filing" in help_text
+    assert "Apple" not in help_text
+
+
+def test_help_for_another_company_lists_questions_written_for_it(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--help"], load_filing=lambda: _OTHER_FILING)
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert exit_info.value.code == EXIT_OK
+    assert "about Contoso Ltd.'s 10-K filing" in help_text
+    assert "1) What are Contoso Ltd.'s top 3 risk factors" in help_text
+    assert "Apple" not in help_text
+
+
+def test_help_works_with_unloadable_settings_in_generic_wording(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def unloadable() -> FilingProfile:
+        raise ConfigError("FILING_FISCAL_YEAR must be a four-digit year")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--help"], load_filing=unloadable)
+
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert exit_info.value.code == EXIT_OK
+    assert "about a company's 10-K filing" in help_text
+    assert "1) What are the company's top 3 risk factors" in help_text
+
+
+def test_another_company_without_a_questions_file_gets_the_generic_list() -> None:
+    questions = load_suggested_questions(_OTHER_FILING).questions
+    assert questions[0].startswith("What are Contoso Ltd.'s top 3 risk factors")
+    assert len(questions) >= 6
+    assert not any("Apple" in question or "{{" in question for question in questions)
+
+
+def test_a_configured_questions_file_is_used_for_any_company(tmp_path: Path) -> None:
+    listed = tmp_path / "contoso_questions.txt"
+    listed.write_text("# Contoso's own list\nHow big is the widget backlog?\n")
+    filing = FilingProfile.from_mapping(
+        {"SUGGESTED_QUESTIONS_PATH": str(listed), "FILING_COMPANY": "Contoso Ltd."}
+    )
+    assert load_suggested_questions(filing).questions == ("How big is the widget backlog?",)
+
+
+def test_an_unreadable_questions_file_is_one_startup_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filing = FilingProfile.from_mapping({"SUGGESTED_QUESTIONS_PATH": str(tmp_path / "none.txt")})
+    with pytest.raises(SuggestedQuestionsFileError, match="SUGGESTED_QUESTIONS_PATH"):
+        load_suggested_questions(filing)
+
+    status = main(["--help"], load_filing=lambda: filing)
+
+    captured = capsys.readouterr()
+    assert (status, captured.out) == (EXIT_CONFIG_ERROR, "")
+    assert captured.err.startswith("Error: cannot load the suggested questions: ")
+    assert captured.err.count("\n") == 1
