@@ -649,7 +649,9 @@ Read only by `Settings` (`src/utils/config.py`) from `.env` overlaid by the proc
 `FilingProfile` (`Settings.filing`), which loads without the API keys so `--help` can name the
 company. When `FILING_PATH` is not the shipped Filing, `FILING_COMPANY` and
 `FILING_FISCAL_YEAR` are required: a missing or blank one exits 2 naming it, so another
-company's 10-K is never described as Apple's FY2025 one. Relative paths resolve against the
+company's 10-K is never described as Apple's FY2025 one. The shipped Filing is recognised by its
+resolved path (an absolute path or a symlink to it still counts), and only it gets the
+Apple suggested questions. Relative paths resolve against the
 repository root, so the working directory does not matter. API keys are excluded from
 `Settings`' repr and never appear in an error message or a log line.
 
@@ -695,8 +697,7 @@ What carries over and what may not:
   separator, or a bare `28` / `- 28 -` / `Page 28` that ends its page. A footer counts only
   when another footer shares its offset from the physical page, so a stray figure that ends a
   page stays text. A filer with none of these gets citations with a Section Path and no page,
-  never a guessed one. A switch to the shipped Filing's spelling (`data/../data/…`, an
-  absolute path) still counts as the shipped Filing and keeps its own questions.
+  never a guessed one.
 
 ### Error handling and security
 
