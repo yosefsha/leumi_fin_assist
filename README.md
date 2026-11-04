@@ -15,7 +15,7 @@ It is built for the two test queries of the assignment ([`docs/TASKS.md`](docs/T
 
 ```
 $ finassist
-Financial Research Assistant — Apple 10-K (FY2025) + web search
+Financial Research Assistant — Apple Inc. 10-K (FY2025) + web search
 Try one of these, or type your own question:
   1) What are Apple's top 3 risk factors mentioned in their latest 10-K, and what percentage of total revenue did they spend on R&D?
   2) How does Apple's gross margin compare to Microsoft's current gross margin, and what reasons does Apple cite in their 10-K for any margin pressure?
@@ -105,8 +105,8 @@ embedding model and the index.
    [SEC EDGAR page](https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000320193)
    (filing index:
    [`000032019325000079`](https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/),
-   document `aapl-20250927.htm`). Nothing to download. To use another 10-K, see
-   `FILING_PATH` and `FILING_FISCAL_YEAR` under [Configuration](#configuration).
+   document `aapl-20250927.htm`). Nothing to download. To use another company's 10-K, see
+   [Using another company's 10-K](#using-another-companys-10-k).
 
 4. **Add your API keys.**
 
@@ -429,16 +429,19 @@ data/apple_10k_2025.htm
 
 All prompt text lives in [`prompts/`](prompts/); code never hard-codes it.
 `load_prompt(name)` reads `prompts/<name>.txt` and `render_prompt` fills `{{placeholders}}`,
-failing if a placeholder and its value don't match.
+failing if a placeholder and its value don't match. No company is named in a prompt: the filer
+is the `{{company}}` placeholder, filled from `FILING_COMPANY`; only the shipped Filing's
+`suggested_questions.txt` names Apple.
 
 | File | Role |
 |---|---|
-| `system_prompt.txt` | Executor rules: which source for which fact, Item scoping and query wording, "top N" risk factors, `calculate` for all arithmetic, primary vs secondary web sources and periods, segment vs company-wide metrics, citation format, how to report gaps. Placeholders `{{fiscal_year}}`, `{{today}}`. |
-| `planner_prompt.txt` | The planning call: usually 2–6 steps, each naming a tool and its purpose, with the routing rules above. Placeholders `{{fiscal_year}}`, `{{today}}`, `{{tools}}`. |
-| `tool_descriptions.txt` | One `## <tool>` section per tool, used as the tool's `description` for both the planner and the executor. |
+| `system_prompt.txt` | Executor rules: which source for which fact, Item scoping and query wording, "top N" risk factors, `calculate` for all arithmetic, primary vs secondary web sources and periods, segment vs company-wide metrics, citation format, how to report gaps. Placeholders `{{company}}`, `{{fiscal_year}}`, `{{today}}`. |
+| `planner_prompt.txt` | The planning call: usually 2–6 steps, each naming a tool and its purpose, with the routing rules above. Placeholders `{{company}}`, `{{fiscal_year}}`, `{{today}}`, `{{tools}}`. |
+| `tool_descriptions.txt` | One `## <tool>` section per tool, used as the tool's `description` for both the planner and the executor. `search_filing` and `web_search` use `{{company}}`; each section's placeholders must match its values like a prompt's. |
 | `round_limit.txt` | Appended after the 8th tool round: answer now with the evidence gathered, cite only known IDs, and name what is missing. |
-| `evidence_check_prompt.txt` | The evidence check: what each gap `problem` means, which gaps not to report (wording, facts the question does not ask for, Filing facts to replace with newer ones), how to write retry guidance (company's own statements first, components plus `calculate` when a ratio is not stated, new query wording, never a segment for the company), at most three gaps, one per fact. Placeholders `{{fiscal_year}}`, `{{today}}`, `{{tools}}`. |
-| `suggested_questions.txt` | The CLI's numbered suggested questions, one per line (`#` comments): the two test queries first, then a Filing-only, a web-only, a cross-reference (Note) and a calculation question. Not sent to the model. |
+| `evidence_check_prompt.txt` | The evidence check: what each gap `problem` means, which gaps not to report (wording, facts the question does not ask for, Filing facts to replace with newer ones), how to write retry guidance (company's own statements first, components plus `calculate` when a ratio is not stated, new query wording, never a segment for the company), at most three gaps, one per fact. Placeholders `{{company}}`, `{{fiscal_year}}`, `{{today}}`, `{{tools}}`. |
+| `suggested_questions.txt` | The CLI's numbered suggested questions, one per line (`#` comments): the two test queries first, then a Filing-only, a web-only, a cross-reference (Note) and a calculation question, for the shipped Apple Filing. Not sent to the model. |
+| `generic_suggested_questions.txt` | The same six kinds of question written for `{{company}}`: the menu for another company's Filing when `SUGGESTED_QUESTIONS_PATH` is not set. |
 | `evidence_retry.txt` | The user turn that sends the gaps back: the numbered gaps with their guidance, the tool rounds left, and "write the complete answer again". Placeholders `{{gaps}}`, `{{rounds_left}}`. |
 
 ---
@@ -452,10 +455,10 @@ Passage, Index Entry, Table Card, Citation) are defined in [`CONTEXT.md`](CONTEX
 
 | Module | Responsibility |
 |---|---|
-| `src/main.py` | Entry point (`main`, also the `finassist` console script): load the suggested questions → parse options → load `Settings` → configure logging → `build_agent` → `run_cli`. |
+| `src/main.py` | Entry point (`main`, also the `finassist` console script): load the `FilingProfile` (no keys needed) and its suggested questions → parse options → load `Settings` → configure logging → `build_agent` → `run_cli`. |
 | `src/cli/` | `cli_options` (argparse), `cli_app` (`run_cli`, exit codes), `repl`, `menu` + `suggested_questions` (the numbered suggestions and the welcome screen), `question_session` (one question: progress, answer, error, Ctrl-C), `trace_printer` + `tool_call_format` (live `[Plan]` / `[Tool: …]` / `[Check] …`), `answer_printer` (answer, Sources, notes), `question_answerer` (the port the CLI needs). |
 | `src/agent.py` | `ResearchAgent.answer(question) -> AgentResult`: planner, the tool-use loop, and the evidence check with its one retry. |
-| `src/agent_factory.py` | Composition root: `build_agent(settings, force_rebuild, observer)`, `build_tool_registry(index, web_client)`. |
+| `src/agent_factory.py` | Composition root: `build_agent(settings, force_rebuild, observer)`, `build_tool_registry(index, web_client, company)`. |
 | `src/tools/` | `registry` (`Tool`, `ToolOutput`, `ToolRegistry`), `search_filing`, `get_passage`, `tavily_search` (`web_search`), `calculator` + `arithmetic` (`calculate`), `argument_errors`, `passage_json`. |
 | `src/utils/` — Filing | `filing_layout`, `filing_blocks`, `html_text`, `table_renderer` (HTML → ordered text/table blocks with pages; tables → Markdown), `filing_parser` (→ Passages), `filing_items`, `passage`. |
 | `src/utils/` — index | `chunker`, `text_packer`, `table_card_builder`, `index_entry`, `filing_index_loader` (reuse/rebuild, 512-token guard), `filing_index_factory`, `filing_index` (hybrid search), `bm25_retriever`, `rank_fusion`, `passage_hit`, `cross_reference_resolver`, `resolved_reference`. |
@@ -487,7 +490,7 @@ injected at the composition root. Tests use the in-memory fakes in `tests/fakes/
 | `passage_id` | `<item-slug>-<NNN>`, numbered per Item in Filing order: `item-1a-002`, `item-8-021`, `front-matter-001`. |
 | `item` | `Front Matter`, `Item 1` … `Item 16` (incl. `1A`, `1B`, `1C`, `7A`, `9A`–`9C`). |
 | `section_path` | Heading trail, e.g. `("Item 7", "Gross Margin", "Products Gross Margin")`; written `Item 7 > Gross Margin > …`. |
-| `page` / `page_approximate` | Printed page from the page footer; `None` only for the unnumbered cover; `approximate` when inferred. |
+| `page` / `page_approximate` | Printed page from the page footer; `None` for the unnumbered cover, and for every page of a Filing whose footers carry no page number (the citation then gives the Section Path alone, never a guessed page); `approximate` when inferred. |
 | `kind` | `section` (text under one heading), `risk_factor` (one Item 1A risk factor), `note` (a whole Note to the financial statements), `table` (one table as Markdown with its caption). |
 | `content` | Markdown: `## heading`, paragraphs; a table inside text is replaced by a `_[Table: <caption>]_` line, the table being its own Passage. |
 
@@ -620,9 +623,13 @@ from any directory.
 | `--quiet` | No progress line, plan, trace or `[Check]` lines. stdout: only answers and Sources. Menu, prompt, echo, notes and errors: stderr. |
 | `--rebuild-index` | Rebuild the Filing index before starting, even if it is current. |
 
-The suggestions come from [`prompts/suggested_questions.txt`](prompts/suggested_questions.txt);
-`finassist --help` lists them with usage examples, and needs no API keys. A missing or empty suggestions
-file is a one-line configuration error (exit status 2).
+The suggestions come from [`prompts/suggested_questions.txt`](prompts/suggested_questions.txt)
+for the shipped Filing, from `SUGGESTED_QUESTIONS_PATH` when it is set, and otherwise from
+[`prompts/generic_suggested_questions.txt`](prompts/generic_suggested_questions.txt) written for
+`FILING_COMPANY`. `finassist --help` lists them with usage examples and names the configured
+company; it needs no API keys, and uses generic wording ("a company's 10-K") if the Filing
+settings are invalid. A missing, unreadable or empty suggestions file is a one-line
+configuration error (exit status 2).
 
 | Exit status | When |
 |---|---|
@@ -638,7 +645,11 @@ the answer hit the output limit.
 ### Configuration
 
 Read only by `Settings` (`src/utils/config.py`) from `.env` overlaid by the process environment
-(a blank environment variable does not override `.env`). Relative paths resolve against the
+(a blank environment variable does not override `.env`). The Filing settings form a
+`FilingProfile` (`Settings.filing`), which loads without the API keys so `--help` can name the
+company. When `FILING_PATH` is not the shipped Filing, `FILING_COMPANY` and
+`FILING_FISCAL_YEAR` are required: a missing or blank one exits 2 naming it, so another
+company's 10-K is never described as Apple's FY2025 one. Relative paths resolve against the
 repository root, so the working directory does not matter. API keys are excluded from
 `Settings`' repr and never appear in an error message or a log line.
 
@@ -647,11 +658,42 @@ repository root, so the working directory does not matter. API keys are excluded
 | `ANTHROPIC_API_KEY` | yes | — | Non-blank; a missing key exits 2 naming the variable. |
 | `TAVILY_API_KEY` | yes | — | Non-blank; as above. |
 | `ANTHROPIC_MODEL` | no | `claude-sonnet-5-5` | Any model that supports tool use and structured outputs. |
-| `FILING_PATH` | no | `data/apple_10k_2025.htm` | The 10-K HTML to answer from. |
-| `FILING_FISCAL_YEAR` | no | `2025` | Four-digit year, no leading zero. Written into every Filing citation as `10-K FY<year>` and into the prompts. Change it together with `FILING_PATH`. |
+| `FILING_PATH` | no | `data/apple_10k_2025.htm` | The 10-K HTML to answer from. Changing it re-indexes automatically. |
+| `FILING_COMPANY` | only with another `FILING_PATH` | `Apple Inc.` | The filer's name as the prompts, the tool descriptions, the banner and `--help` write it (`{{company}}`). One line, at most 100 printable characters. |
+| `FILING_FISCAL_YEAR` | only with another `FILING_PATH` | `2025` | Four-digit year, no leading zero. Written into every Filing citation as `10-K FY<year>` and into the prompts. |
+| `SUGGESTED_QUESTIONS_PATH` | no | — | A suggested-questions file for the Filing (same format as `prompts/suggested_questions.txt`). Without it, another company gets the generic list. |
 | `INDEX_DIR` | no | `.index` | Holds `models/` (embedding model) and `chroma/` (index). |
 | `LOG_LEVEL` | no | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL` (case-insensitive). |
 | `RUN_LIVE_TESTS` | no | `false` | Read by the test suite only (`tests/live_switch.py`): `true` (case-insensitive) runs the `live` tests. |
+
+### Using another company's 10-K
+
+No code change is needed. Download the 10-K's main HTML document from SEC EDGAR (the
+`<ticker>-<period>.htm` file in the filing index; EDGAR requires a descriptive `User-Agent`
+header on scripted downloads), save it under `data/` (or anywhere), and set in `.env`:
+
+```bash
+FILING_PATH=data/msft_10k_2026.htm
+FILING_COMPANY=Microsoft Corporation
+FILING_FISCAL_YEAR=2026
+# optional: your own list, one question per line
+# SUGGESTED_QUESTIONS_PATH=data/msft_questions.txt
+```
+
+The next run re-indexes the new Filing (the index is keyed by the Filing's content), the
+banner and `--help` name the company, and the menu offers the generic questions written for it.
+To keep the Apple index too, point `INDEX_DIR` at a second directory. Remove the lines to go
+back to Apple.
+
+What carries over and what may not:
+
+- **Items** are found from the Table of Contents links (`Item 1A.` …) or, failing that, from
+  bold `Item N.` headings. **Risk factors** are Item 1A's bold-italic headings, and **Notes** are
+  Item 8's `Note N – Title` headings: a filer that formats these differently gets section
+  Passages instead, still searchable and cited by Section Path.
+- **Pages** come from the footer: `… Form 10-K | 28` (Apple), `Form 10-K` with another
+  separator, or a bare `28` / `- 28 -` / `Page 28` that ends its page. A filer with none of
+  these gets citations with a Section Path and no page, never a guessed one.
 
 ### Error handling and security
 
@@ -798,7 +840,12 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
    runs. The live tests assert structure and the Apple figures, not a Microsoft figure, because
    web data drifts.
 7. **One Filing at a time.** The agent answers from a single 10-K (`FILING_PATH`); it cannot
-   compare two years of filings. Replacing the Filing triggers a re-index automatically.
+   compare two years or two companies' filings. Switching to another company's 10-K is
+   configuration only and re-indexes automatically, but the parser was tuned on Apple's
+   Workiva-generated Filing: another filer's risk factors, Notes or page footers may be
+   formatted in ways it does not recognise (see
+   [Using another company's 10-K](#using-another-companys-10-k)). The live tests and the
+   recorded runs cover Apple only.
 8. **"Top N" risk factors** are the first N listed in Item 1A, since the 10-K does not rank
    them; the answer says so.
 9. **No token or cost accounting** yet. The evidence check adds one model call per question,
@@ -820,6 +867,9 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
 - **XBRL facts** as Table Card metadata or a fact tool, if a wrong figure is traced to table
   rendering (ADR-0003).
 - **Streaming output** and prompt caching for lower latency and cost.
+- **Several filings at once** (backlog issue #36): index more than one 10-K and answer
+  cross-year and cross-company questions from filings, with each citation naming its
+  company and fiscal year.
 
 ---
 
@@ -835,7 +885,8 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
 ├── .env.example              every setting, documented
 ├── data/apple_10k_2025.htm   the Filing (FY2025, accession 0000320193-25-000079)
 ├── prompts/                  system_prompt, planner_prompt, tool_descriptions, round_limit,
-│                             evidence_check_prompt, evidence_retry, suggested_questions (.txt)
+│                             evidence_check_prompt, evidence_retry, suggested_questions,
+│                             generic_suggested_questions (.txt)
 ├── src/
 │   ├── main.py               entry point
 │   ├── agent.py              ResearchAgent: planner + tool-use loop + evidence check

@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "finassist"
 version = "0.1.0"
-description = "Financial research agent over Apple's 10-K and live web search, with citations."
+description = "Financial research agent over a company's 10-K (Apple's FY2025 shipped) and live web search, with citations."
 readme = "README.md"
 requires-python = ">=3.12"
 dynamic = ["dependencies"]

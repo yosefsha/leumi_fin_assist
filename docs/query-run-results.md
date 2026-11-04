@@ -299,3 +299,19 @@ Query 2 run four times by hand with `python src/main.py --query "$Q" | tee <file
 - After 1 reached the 8-round limit: the retry's 5 searches used the remaining budget.
 - After 1 cited a DuckDuckGo search-results URL as a source for Microsoft's revenue.
 - After 2's saved output ends after its second `calculate`, before the check's result and the answer. The cause was not captured (stderr was not saved), so the run is not counted.
+
+## 2026-11-04: configurable company (#35)
+
+**Apple default, unchanged.** One run of `finassist --quiet 1` on `feat/35-configurable-company` with no Filing settings in `.env` (so `FILING_COMPANY` defaulted to `Apple Inc.`), `claude-sonnet-5-5`, a fresh `INDEX_DIR` (model download and index build included: 68 s wall clock, about 20 s of it answering).
+
+| | Result |
+|---|---|
+| Index | 197 Passages → 259 Index Entries, as before |
+| Parse | Byte-identical Passages before and after the footer changes (all 197 compared) |
+| Risk factors | The first three listed in Item 1A (economic conditions; political events, trade and business interruptions; competition and technological change), with the "not ranked" caveat |
+| R&D share | $34,550M / $416,161M = 8.30% via `calculate` |
+| Sources | 4, all Filing: three Item 1A risk factors (pp. 5, 6, 7) and Item 8 Consolidated Statements of Operations (p. 29) |
+
+The prompts now read "Apple Inc." where they read "Apple"/"Apple's" before (`{{company}}`); the answer was the same as the recorded Query 1 runs.
+
+**Second company: not run.** SEC EDGAR returned HTTP 403 to both scripted download attempts of Microsoft's FY2026 10-K (accession `0001193125-26-323660`, filed 2026-07-29), even with a descriptive `User-Agent`, so the parser findings and the two live questions on a second Filing are still to do. The document is <https://www.sec.gov/Archives/edgar/data/789019/000119312526323660/msft-20260630.htm>. Footer handling for other filers is covered offline by a synthetic Filing instead (`tests/offline/test_filing_parser.py`): `Form 10-K` footers with other separators, bare page numbers, a page break on a `div`, a footer that does not count upward, and no footers at all (no page, never a guessed one).
