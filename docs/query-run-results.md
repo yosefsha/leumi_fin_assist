@@ -302,7 +302,7 @@ Query 2 run four times by hand with `python src/main.py --query "$Q" | tee <file
 
 ## 2026-11-04: configurable company (#35)
 
-**Apple default, unchanged.** One run of `finassist --quiet 1` on `feat/35-configurable-company` with no Filing settings in `.env` (so `FILING_COMPANY` defaulted to `Apple Inc.`), `claude-sonnet-5-5`, a fresh `INDEX_DIR` (model download and index build included: 68 s wall clock, about 20 s of it answering).
+**Apple default, unchanged.** One run of `finassist --quiet 1` on `feat/35-configurable-company` with no Filing settings in `.env` (so `FILING_COMPANY` defaulted to `Apple Inc.`), `claude-sonnet-5-5`, a fresh `INDEX_DIR`: 68 s wall clock, including the embedding-model download and a 47 s index build.
 
 | | Result |
 |---|---|
