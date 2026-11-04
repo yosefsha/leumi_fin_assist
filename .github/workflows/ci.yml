@@ -21,8 +21,13 @@ concurrency:
 
 jobs:
   offline:
-    name: Lint and offline tests
+    name: Lint and offline tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.14 is the project's version; 3.12 is the oldest `requires-python` allows.
+        python-version: ["3.12", "3.14"]
     timeout-minutes: 20
     env:
       # Hugging Face's Xet transfer has stalled on this model's download; plain
@@ -34,7 +39,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: requirements.txt
 
@@ -49,7 +54,9 @@ jobs:
         run: finassist --help
 
       - name: Lint
-        run: ruff check .
+        run: |
+          ruff check .
+          ruff format --check .
 
       # Key the cache on the model the code actually uses, read from the code
       # rather than repeated here, so changing the model invalidates the cache.
