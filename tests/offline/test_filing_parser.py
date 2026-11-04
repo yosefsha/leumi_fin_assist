@@ -95,28 +95,29 @@ def test_missing_file_raises(tmp_path: Path) -> None:
         FilingParser().parse_file(tmp_path / "missing.htm")
 
 
-# --- Other filers' page footers (issue #35), on a synthetic three-page Filing -----------------
+# --- Other filers' page footers (issue #35), on a synthetic Filing ----------------------------
 
 _HR_BREAK = '<hr style="page-break-after:always"/>'
 _DIV_BREAK = '<div style="page-break-before:always"></div>'
+_DOUBLE_BREAK = '<div style="page-break-after:always"></div><hr style="page-break-after:always"/>'
+_ITEMS = ("1", "1A", "2", "3")
 
 
-def _synthetic_filing(footer_1: str, footer_2: str, page_break: str = _HR_BREAK) -> str:
-    """A cover with a linked Table of Contents, then Item 1 and Item 1A on one page each."""
-    return f"""<html><body>
-<table>
-  <tr><td><a href="#i1">Item 1.</a></td><td>Business</td></tr>
-  <tr><td><a href="#i1a">Item 1A.</a></td><td>Risk Factors</td></tr>
-</table>
+def _synthetic_filing(*page_endings: str, page_break: str = _HR_BREAK) -> str:
+    """A cover with a linked Table of Contents, then one page per Item, each closed by
+    the matching `page_endings` text (a footer, or the last line of the page's text)."""
+    items = _ITEMS[: len(page_endings)]
+    toc = "".join(f'<tr><td><a href="#i{i}">Item {i}.</a></td></tr>' for i in items)
+    pages = "".join(
+        f"""{page_break}
+<div id="i{item}"><span style="font-weight:bold">Item {item}. Heading {item}</span></div>
+<div>Contoso discusses Item {item} here.</div>
+<div>{ending}</div>"""
+        for item, ending in zip(items, page_endings, strict=True)
+    )
+    return f"""<html><body><table>{toc}</table>
 <div>Contoso Ltd. Annual Report on Form 10-K for the fiscal year 2026</div>
-{page_break}
-<div id="i1"><span style="font-weight:bold">Item 1. Business</span></div>
-<div>Contoso makes 12 kinds of widgets.</div>
-<div>{footer_1}</div>
-{page_break}
-<div id="i1a"><span style="font-weight:bold">Item 1A. Risk Factors</span></div>
-<div>Widget demand may fall.</div>
-<div>{footer_2}</div>
+{pages}
 </body></html>"""
 
 
@@ -144,13 +145,15 @@ def test_other_filers_footers_give_each_page_its_printed_number(
     assert not any(footer_2 in passage.content for passage in passages)
 
 
-def test_a_page_break_on_a_div_separates_pages_too() -> None:
-    passages = FilingParser().parse(_synthetic_filing("7", "8", page_break=_DIV_BREAK))
-    assert _pages(passages) == {"Item 1": (7, False), "Item 1A": (8, False)}
+@pytest.mark.parametrize("page_break", [_DIV_BREAK, _DOUBLE_BREAK], ids=["div", "div-and-hr"])
+def test_a_page_break_on_a_div_separates_pages_once(page_break: str) -> None:
+    passages = FilingParser().parse(_synthetic_filing("7", "8", "", page_break=page_break))
+    # Item 2's page has no footer: it continues from 8, so a phantom page would make it 10.
+    assert _pages(passages) == {"Item 1": (7, False), "Item 1A": (8, False), "Item 2": (9, True)}
 
 
 def test_a_filing_without_footers_gives_no_page_rather_than_a_guess() -> None:
-    passages = FilingParser().parse(_synthetic_filing("Contoso makes gadgets.", "Gadgets too."))
+    passages = FilingParser().parse(_synthetic_filing("Gadgets.", "More gadgets."))
     assert {passage.page for passage in passages} == {None}
     assert not any(passage.page_approximate for passage in passages)
 
@@ -164,7 +167,17 @@ def test_a_bare_number_that_is_not_last_on_its_page_is_content_not_a_footer() ->
     assert any("12" in passage.content for passage in passages if passage.item == "Item 1")
 
 
-def test_a_footer_that_does_not_count_upward_is_not_a_page_number() -> None:
+def test_a_stray_figure_ending_a_page_is_kept_as_text_and_does_not_shift_later_pages() -> None:
+    passages = FilingParser().parse(_synthetic_filing("7", "250", "9", "10"))
+    assert _pages(passages) == {
+        "Item 1": (7, False),
+        "Item 1A": (8, True),
+        "Item 2": (9, False),
+        "Item 3": (10, False),
+    }
+    assert "250" in next(p.content for p in passages if p.item == "Item 1A")
+
+
+def test_footers_that_disagree_with_each_other_give_no_page() -> None:
     passages = FilingParser().parse(_synthetic_filing("7", "3"))
-    # Page 3 after page 7 is not a page number: the page continues from 7, marked approximate.
-    assert _pages(passages) == {"Item 1": (7, False), "Item 1A": (8, True)}
+    assert {passage.page for passage in passages} == {None}

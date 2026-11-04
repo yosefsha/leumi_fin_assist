@@ -627,7 +627,7 @@ The suggestions come from [`prompts/suggested_questions.txt`](prompts/suggested_
 for the shipped Filing, from `SUGGESTED_QUESTIONS_PATH` when it is set, and otherwise from
 [`prompts/generic_suggested_questions.txt`](prompts/generic_suggested_questions.txt) written for
 `FILING_COMPANY`. `finassist --help` lists them with usage examples and names the configured
-company; it needs no API keys, and uses generic wording ("a company's 10-K") if the Filing
+company; it needs no API keys, and uses generic wording ("the company's 10-K") if the Filing
 settings are invalid. A missing, unreadable or empty suggestions file is a one-line
 configuration error (exit status 2).
 
@@ -692,8 +692,11 @@ What carries over and what may not:
   Item 8's `Note N – Title` headings: a filer that formats these differently gets section
   Passages instead, still searchable and cited by Section Path.
 - **Pages** come from the footer: `… Form 10-K | 28` (Apple), `Form 10-K` with another
-  separator, or a bare `28` / `- 28 -` / `Page 28` that ends its page. A filer with none of
-  these gets citations with a Section Path and no page, never a guessed one.
+  separator, or a bare `28` / `- 28 -` / `Page 28` that ends its page. A footer counts only
+  when another footer shares its offset from the physical page, so a stray figure that ends a
+  page stays text. A filer with none of these gets citations with a Section Path and no page,
+  never a guessed one. A switch to the shipped Filing's spelling (`data/../data/…`, an
+  absolute path) still counts as the shipped Filing and keeps its own questions.
 
 ### Error handling and security
 

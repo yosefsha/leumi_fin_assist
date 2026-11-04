@@ -568,7 +568,11 @@ def test_missing_api_key_is_one_startup_line_naming_the_variable(
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
 
-    status = main(["--query", "q"], load_settings=lambda: Settings.load(empty_env))
+    status = main(
+        ["--query", "q"],
+        load_settings=lambda: Settings.load(empty_env),
+        load_filing=lambda: _APPLE_FILING,
+    )
 
     captured = capsys.readouterr()
     assert status == EXIT_CONFIG_ERROR
@@ -606,7 +610,9 @@ def test_an_index_that_cannot_be_opened_is_one_startup_line(
     monkeypatch.setattr(main_module, "configure_logging", lambda level: None)
     settings = Settings.from_mapping({"ANTHROPIC_API_KEY": "a", "TAVILY_API_KEY": "t"})
 
-    status = main(["--query", "q"], load_settings=lambda: settings)
+    status = main(
+        ["--query", "q"], load_settings=lambda: settings, load_filing=lambda: _APPLE_FILING
+    )
 
     captured = capsys.readouterr()
     assert (status, captured.out) == (EXIT_FAILURE, "")
@@ -753,7 +759,7 @@ def test_the_banner_names_the_configured_company_and_fiscal_year() -> None:
 
 @pytest.mark.parametrize(
     ("company", "filer"),
-    [("Contoso Ltd.", "Contoso Ltd.'s 10-K"), (None, "a company's 10-K")],
+    [("Contoso Ltd.", "Contoso Ltd.'s 10-K"), (None, "the company's 10-K")],
     ids=["configured", "settings-not-loaded"],
 )
 def test_help_names_the_configured_company_or_a_generic_one(
@@ -789,7 +795,7 @@ def test_help_works_with_unloadable_settings_in_generic_wording(
 
     help_text = " ".join(capsys.readouterr().out.split())
     assert exit_info.value.code == EXIT_OK
-    assert "about a company's 10-K filing" in help_text
+    assert "about the company's 10-K filing" in help_text
     assert "1) What are the company's top 3 risk factors" in help_text
 
 
@@ -798,6 +804,37 @@ def test_another_company_without_a_questions_file_gets_the_generic_list() -> Non
     assert questions[0].startswith("What are Contoso Ltd.'s top 3 risk factors")
     assert len(questions) >= 6
     assert not any("Apple" in question or "{{" in question for question in questions)
+
+
+@pytest.mark.parametrize(
+    ("values", "first"),
+    [
+        ({"FILING_COMPANY": "Apple"}, "What are Apple's top 3 risk factors"),
+        (
+            {
+                "FILING_PATH": str(PROJECT_ROOT / "data" / ".." / DEFAULT_FILING_PATH),
+                "FILING_COMPANY": "Apple Inc.",
+            },
+            "What are Apple's top 3 risk factors",
+        ),
+        (
+            {
+                "FILING_PATH": "data/apple_10k_2024.htm",
+                "FILING_COMPANY": "Apple Inc.",
+                "FILING_FISCAL_YEAR": "2024",
+            },
+            "What are Apple Inc.'s top 3 risk factors",
+        ),
+    ],
+    ids=["shipped-filing-renamed", "shipped-filing-respelled", "other-apple-filing"],
+)
+def test_the_shipped_list_follows_the_shipped_filing_not_the_company_name(
+    values: dict[str, str], first: str
+) -> None:
+    """The shipped list asks about FY2025 and its Note 7, so only the shipped Filing gets it."""
+    assert (
+        load_suggested_questions(FilingProfile.from_mapping(values)).questions[0].startswith(first)
+    )
 
 
 def test_a_configured_questions_file_is_used_for_any_company(tmp_path: Path) -> None:

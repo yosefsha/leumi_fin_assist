@@ -5,13 +5,11 @@ import textwrap
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from cli.suggested_questions import SuggestedQuestions, is_number_choice
+from cli.suggested_questions import UNKNOWN_COMPANY, SuggestedQuestions, is_number_choice
 
 PROG = "finassist"
 HELP_WIDTH = 79
 
-GENERIC_FILER = "a company"
-"""Who `--help` says the Filing belongs to when the settings cannot be loaded."""
 DESCRIPTION = (
     "Answer questions about {filer}'s 10-K filing and the live web, with citations. "
     "Without a question, starts an interactive prompt that lists suggested questions "
@@ -58,7 +56,7 @@ def parse_cli_args(
 
     The question comes as a positional argument or, equivalently, `--query`. A
     question that is only a number runs that suggested question. `--help` names
-    `company` as the filer, or "a company" when it is `None` (settings not loaded).
+    `company` as the filer, or "the company" when it is `None` (settings not loaded).
     """
     parser = _parser(suggestions, company)
     namespace = parser.parse_args(argv)
@@ -77,7 +75,7 @@ def parse_cli_args(
 
 
 def _parser(suggestions: SuggestedQuestions, company: str | None) -> argparse.ArgumentParser:
-    description = DESCRIPTION.format(filer=company or GENERIC_FILER)
+    description = DESCRIPTION.format(filer=company or UNKNOWN_COMPANY)
     parser = argparse.ArgumentParser(
         prog=PROG,
         description=f"{textwrap.fill(description, HELP_WIDTH)}\n\n{SAME_AS_MAIN}",

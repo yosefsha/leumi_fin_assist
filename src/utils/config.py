@@ -56,6 +56,11 @@ class FilingProfile:
     fiscal_year: int
     suggested_questions_path: Path | None
 
+    @property
+    def is_shipped(self) -> bool:
+        """Whether this is the Filing shipped in the repository (Apple's FY2025 10-K)."""
+        return _is_shipped_filing(self.path)
+
     @classmethod
     def load(cls, env_file: Path = DEFAULT_ENV_FILE) -> "FilingProfile":
         """Load the profile from `env_file` (if present) overlaid by the process environment."""
@@ -71,7 +76,7 @@ class FilingProfile:
         FY2025 one. Raises `MissingSettingError` or `ConfigError` otherwise.
         """
         path = _project_path(_optional(values, "FILING_PATH", DEFAULT_FILING_PATH))
-        if path == _project_path(DEFAULT_FILING_PATH):
+        if _is_shipped_filing(path):
             company = _optional(values, "FILING_COMPANY", DEFAULT_FILING_COMPANY)
             fiscal_year = _optional(values, "FILING_FISCAL_YEAR", DEFAULT_FILING_FISCAL_YEAR)
         else:
@@ -148,6 +153,11 @@ def _project_path(raw: str) -> Path:
     """Resolve a relative path against the repository root, so the CWD does not matter."""
     path = Path(raw).expanduser()
     return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def _is_shipped_filing(path: Path) -> bool:
+    """Whether `path` is the shipped Filing, however it is spelled (relative, `..`, a symlink)."""
+    return path.resolve() == _project_path(DEFAULT_FILING_PATH).resolve()
 
 
 def _log_level(raw: str) -> str:

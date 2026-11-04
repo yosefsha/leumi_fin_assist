@@ -10,12 +10,16 @@ tables, the Table of Contents' anchor targets, and the printed page of each bloc
 Other filers' footers are read too: `Form 10-K` followed by the page number with
 another separator (or none), and a bare page number (`28`, `- 28 -`, `Page 28`)
 when it is the last text on its page. A page break may also be the style of a
-`div` or `p`. A footer that does not number pages upward is ignored, and a Filing
-without footers gets no page numbers: a page is left out rather than guessed.
+`div` or `p`; breaks with nothing between them make one break, not an empty page.
+A footer counts only when another footer agrees with it (the same printed minus
+physical page offset), so a stray figure ending a page is kept as text, not taken
+as a page number. A Filing without such footers gets no page numbers: a
+page is left out rather than guessed.
 """
 
 import re
 import warnings
+from collections import Counter
 
 from bs4 import BeautifulSoup, NavigableString, Tag, XMLParsedAsHTMLWarning
 
@@ -65,9 +69,14 @@ class FilingLayoutReader:
         walk = _Walk(targets, self._table_renderer)
         walk.visit(soup.body or soup)
         walk.end_page()
-        return FilingLayout(
-            blocks=tuple(walk.blocks), pages=self._number_pages(walk.footers, walk.page_index)
-        )
+        footers = _agreeing_footers(walk.footers)
+        # A bare page number taken as a footer is not text; one that was not taken stays.
+        dropped = {
+            walk.bare_footer_blocks[page]
+            for page in footers.keys() & walk.bare_footer_blocks.keys()
+        }
+        blocks = tuple(block for index, block in enumerate(walk.blocks) if index not in dropped)
+        return FilingLayout(blocks=blocks, pages=self._number_pages(footers, walk.page_index))
 
     @staticmethod
     def _toc_targets(soup: BeautifulSoup) -> dict[str, str | None]:
@@ -99,9 +108,9 @@ class FilingLayoutReader:
 
         A page without a footer before the first numbered page (the cover) gets
         `None`; one after it continues from the previous number, flagged
-        approximate. A footer that is not above the last footer read is not a page
-        number and is ignored. A Filing with no footers at all gets `None` for
-        every page: no page is better than a wrong one.
+        approximate. A footer that is not above the last one read is ignored. A
+        Filing with no footers at all gets `None` for every page: no page is better
+        than a wrong one.
         """
         pages: list[PageNumber] = []
         previous: int | None = None
@@ -126,7 +135,11 @@ class _Walk:
         self._table_renderer = table_renderer
         self.blocks: list[Block] = []
         self.footers: dict[int, int] = {}
+        """Candidate footer per physical page: its page number."""
+        self.bare_footer_blocks: dict[int, int] = {}
+        """For a candidate that is a bare page number: the index of its text block."""
         self.page_index = 0
+        self._page_has_content = False
 
     def visit(self, element: Tag) -> None:
         for child in element.children:
@@ -137,7 +150,10 @@ class _Walk:
                 self._add_text(normalize_whitespace(str(child)), bold=False, italic=False)
 
     def end_page(self) -> None:
-        """Close the current physical page: take a bare page number ending it as its footer."""
+        """Close the current physical page: a bare page number ending it is a candidate footer.
+
+        The text block stays until the candidate is confirmed (`_agreeing_footers`).
+        """
         last = self.blocks[-1] if self.blocks else None
         if (
             isinstance(last, TextBlock)
@@ -146,8 +162,8 @@ class _Walk:
             and len(last.text) < _MAX_FOOTER_CHARS
             and (footer := _PAGE_ONLY_FOOTER.fullmatch(last.text))
         ):
-            self.blocks.pop()
             self.footers[self.page_index] = int(footer.group(1))
+            self.bare_footer_blocks[self.page_index] = len(self.blocks) - 1
 
     def _visit_tag(self, tag: Tag) -> None:
         style = tag.get("style", "")
@@ -164,8 +180,12 @@ class _Walk:
             self._break_page()
 
     def _break_page(self) -> None:
+        """Start a new physical page, unless the current one is still empty."""
+        if not self._page_has_content:
+            return
         self.end_page()
         self.page_index += 1
+        self._page_has_content = False
 
     def _visit_content(self, tag: Tag) -> None:
         self._add_anchor(tag)
@@ -193,13 +213,26 @@ class _Walk:
         markdown = self._table_renderer.render(table)
         if markdown:
             self.blocks.append(TableBlock(markdown, self.page_index))
+            self._page_has_content = True
 
     def _add_text(self, text: str, bold: bool, italic: bool) -> None:
+        self._page_has_content = True
         footer = _PAGE_FOOTER.search(text)
         if footer and len(text) < _MAX_FOOTER_CHARS:
             self.footers[self.page_index] = int(footer.group(1))
             return
         self.blocks.append(TextBlock(text, self.page_index, bold=bold, italic=italic))
+
+
+def _agreeing_footers(footers: dict[int, int]) -> dict[int, int]:
+    """The candidate footers that another candidate confirms.
+
+    Printed pages keep the same offset from the physical page index while they
+    run on, so a footer whose offset another footer shares is a page number; one
+    whose offset no other footer shares (a stray figure, a one-off) is not.
+    """
+    offsets = Counter(number - page for page, number in footers.items())
+    return {page: number for page, number in footers.items() if offsets[number - page] > 1}
 
 
 def _is_navigation(table: Tag) -> bool:

@@ -8,13 +8,13 @@ names another Filing's own list; without one, another company gets the generic l
 from dataclasses import dataclass
 from pathlib import Path
 
-from utils.config import DEFAULT_FILING_COMPANY, FilingProfile
+from utils.config import FilingProfile
 from utils.prompts import PROMPTS_DIR, load_prompt, render_prompt
 
 SUGGESTIONS_PROMPT = "suggested_questions"
 GENERIC_SUGGESTIONS_PROMPT = "generic_suggested_questions"
 UNKNOWN_COMPANY = "the company"
-"""What the generic list calls the company when the settings cannot be loaded."""
+"""What the generic list and `--help` call the filer when the settings cannot be loaded."""
 
 
 class SuggestedQuestionsFileError(Exception):
@@ -80,7 +80,7 @@ def load_suggested_questions(
     """The suggested questions for `filing` (`None` when the settings cannot be loaded).
 
     `filing.suggested_questions_path` when set; else `<prompts_dir>/suggested_questions.txt`
-    for the shipped company; else the generic list, written for `filing.company` (or
+    for the shipped Filing; else the generic list, written for `filing.company` (or
     for "the company" when `filing` is `None`).
 
     Raises `SuggestedQuestionsFileError` when the configured file cannot be read,
@@ -89,7 +89,7 @@ def load_suggested_questions(
     """
     if filing is not None and filing.suggested_questions_path is not None:
         return SuggestedQuestions.parse(_read_questions_file(filing.suggested_questions_path))
-    if filing is not None and filing.company == DEFAULT_FILING_COMPANY:
+    if filing is not None and filing.is_shipped:
         return SuggestedQuestions.parse(load_prompt(SUGGESTIONS_PROMPT, prompts_dir))
     company = filing.company if filing is not None else UNKNOWN_COMPANY
     generic = render_prompt(GENERIC_SUGGESTIONS_PROMPT, {"company": company}, prompts_dir)
