@@ -6,6 +6,12 @@ whole runs of those divs in `ix:*` tags, separates pages with
 footer such as `Apple Inc. | 2025 Form 10-K | 28`. This module walks that tree
 once and yields what the parser needs: text blocks with their emphasis, rendered
 tables, the Table of Contents' anchor targets, and the printed page of each block.
+
+Other filers' footers are read too: `Form 10-K` followed by the page number with
+another separator (or none), and a bare page number (`28`, `- 28 -`, `Page 28`)
+when it is the last text on its page. A page break may also be the style of a
+`div` or `p`. A footer that does not number pages upward is ignored, and a Filing
+without footers gets no page numbers: a page is left out rather than guessed.
 """
 
 import re
@@ -25,8 +31,14 @@ from utils.html_text import emphasis, normalize_whitespace, visible_text
 from utils.table_renderer import TableRenderer
 
 _ITEM_LINK = re.compile(r"^Item\s+(\d+[A-C]?)\.?$", re.IGNORECASE)
-_PAGE_FOOTER = re.compile(r"Form 10-K\s*\|\s*(\d+)$")
+# `… Form 10-K | 28`, `… Form 10-K 28`, `… Form 10-K – Page 28`: anywhere on its page.
+_PAGE_FOOTER = re.compile(r"Form 10-K\s*(?:[|•·,–—-]\s*)?(?:Page\s+)?(\d{1,3})$", re.IGNORECASE)
+# `28`, `- 28 -`, `Page 28`: only as the last text on its page.
+_PAGE_ONLY_FOOTER = re.compile(r"(?:Page\s+)?(?:[–—-]\s*)?(\d{1,3})(?:\s*[–—-])?", re.IGNORECASE)
+_MAX_FOOTER_CHARS = 80
 _PAGE_BREAK = re.compile(r"page-break-(?:after|before)\s*:\s*always")
+_PAGE_BREAK_BEFORE = re.compile(r"page-break-before\s*:\s*always")
+_PAGE_BREAK_AFTER = re.compile(r"page-break-after\s*:\s*always")
 _INTERNAL_LINK = re.compile(r"^#.")
 _STRUCTURAL_TAGS = ("div", "table", "hr")
 _HIDDEN = re.compile(r"display\s*:\s*none")
@@ -52,6 +64,7 @@ class FilingLayoutReader:
         targets = self._toc_targets(soup)
         walk = _Walk(targets, self._table_renderer)
         walk.visit(soup.body or soup)
+        walk.end_page()
         return FilingLayout(
             blocks=tuple(walk.blocks), pages=self._number_pages(walk.footers, walk.page_index)
         )
@@ -86,16 +99,16 @@ class FilingLayoutReader:
 
         A page without a footer before the first numbered page (the cover) gets
         `None`; one after it continues from the previous number, flagged
-        approximate. A Filing with no footers at all is numbered by physical page
-        count, also flagged approximate.
+        approximate. A footer that is not above the last footer read is not a page
+        number and is ignored. A Filing with no footers at all gets `None` for
+        every page: no page is better than a wrong one.
         """
-        if not footers:
-            return tuple(PageNumber(index + 1, approximate=True) for index in range(last_index + 1))
         pages: list[PageNumber] = []
         previous: int | None = None
+        last_footer = 0
         for index in range(last_index + 1):
-            if index in footers:
-                previous = footers[index]
+            if index in footers and footers[index] > last_footer:
+                previous = last_footer = footers[index]
                 pages.append(PageNumber(previous, approximate=False))
             elif previous is None:
                 pages.append(PageNumber(None, approximate=False))
@@ -123,13 +136,38 @@ class _Walk:
                 # Loose text beside structural siblings: keep it as its own paragraph.
                 self._add_text(normalize_whitespace(str(child)), bold=False, italic=False)
 
+    def end_page(self) -> None:
+        """Close the current physical page: take a bare page number ending it as its footer."""
+        last = self.blocks[-1] if self.blocks else None
+        if (
+            isinstance(last, TextBlock)
+            and last.page_index == self.page_index
+            and self.page_index not in self.footers
+            and len(last.text) < _MAX_FOOTER_CHARS
+            and (footer := _PAGE_ONLY_FOOTER.fullmatch(last.text))
+        ):
+            self.blocks.pop()
+            self.footers[self.page_index] = int(footer.group(1))
+
     def _visit_tag(self, tag: Tag) -> None:
+        style = tag.get("style", "")
         if tag.name == "hr":
-            if _PAGE_BREAK.search(tag.get("style", "")):
-                self.page_index += 1
+            if _PAGE_BREAK.search(style):
+                self._break_page()
             return
-        if _HIDDEN.search(tag.get("style", "")):
+        if _HIDDEN.search(style):
             return
+        if _PAGE_BREAK_BEFORE.search(style):
+            self._break_page()
+        self._visit_content(tag)
+        if _PAGE_BREAK_AFTER.search(style):
+            self._break_page()
+
+    def _break_page(self) -> None:
+        self.end_page()
+        self.page_index += 1
+
+    def _visit_content(self, tag: Tag) -> None:
         self._add_anchor(tag)
         if tag.name == "table":
             self._add_table(tag)
@@ -158,7 +196,7 @@ class _Walk:
 
     def _add_text(self, text: str, bold: bool, italic: bool) -> None:
         footer = _PAGE_FOOTER.search(text)
-        if footer and len(text) < 80:
+        if footer and len(text) < _MAX_FOOTER_CHARS:
             self.footers[self.page_index] = int(footer.group(1))
             return
         self.blocks.append(TextBlock(text, self.page_index, bold=bold, italic=italic))

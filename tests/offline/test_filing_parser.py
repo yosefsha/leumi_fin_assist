@@ -1,4 +1,5 @@
-"""The Filing parser on Apple's FY2025 10-K (issue #3, PR #16), and its failure paths."""
+"""The Filing parser on Apple's FY2025 10-K (issue #3, PR #16), its failure paths, and
+other filers' page footers on a synthetic Filing (issue #35)."""
 
 import re
 from pathlib import Path
@@ -92,3 +93,78 @@ def test_html_without_items_raises(html: str) -> None:
 def test_missing_file_raises(tmp_path: Path) -> None:
     with pytest.raises(FilingParseError, match="Cannot read the Filing"):
         FilingParser().parse_file(tmp_path / "missing.htm")
+
+
+# --- Other filers' page footers (issue #35), on a synthetic three-page Filing -----------------
+
+_HR_BREAK = '<hr style="page-break-after:always"/>'
+_DIV_BREAK = '<div style="page-break-before:always"></div>'
+
+
+def _synthetic_filing(footer_1: str, footer_2: str, page_break: str = _HR_BREAK) -> str:
+    """A cover with a linked Table of Contents, then Item 1 and Item 1A on one page each."""
+    return f"""<html><body>
+<table>
+  <tr><td><a href="#i1">Item 1.</a></td><td>Business</td></tr>
+  <tr><td><a href="#i1a">Item 1A.</a></td><td>Risk Factors</td></tr>
+</table>
+<div>Contoso Ltd. Annual Report on Form 10-K for the fiscal year 2026</div>
+{page_break}
+<div id="i1"><span style="font-weight:bold">Item 1. Business</span></div>
+<div>Contoso makes 12 kinds of widgets.</div>
+<div>{footer_1}</div>
+{page_break}
+<div id="i1a"><span style="font-weight:bold">Item 1A. Risk Factors</span></div>
+<div>Widget demand may fall.</div>
+<div>{footer_2}</div>
+</body></html>"""
+
+
+def _pages(passages: tuple[Passage, ...]) -> dict[str, tuple[int | None, bool]]:
+    return {p.item: (p.page, p.page_approximate) for p in passages if p.item != "Front Matter"}
+
+
+@pytest.mark.parametrize(
+    ("footer_1", "footer_2"),
+    [
+        ("Contoso Ltd. | 2026 Form 10-K | 7", "Contoso Ltd. | 2026 Form 10-K | 8"),
+        ("Contoso Ltd. 2026 Form 10-K 7", "Contoso Ltd. 2026 Form 10-K 8"),
+        ("2026 Annual Report on Form 10-K – Page 7", "2026 Annual Report on Form 10-K – Page 8"),
+        ("7", "8"),
+        ("- 7 -", "- 8 -"),
+        ("Page 7", "Page 8"),
+    ],
+    ids=["apple-style", "space", "dash-page", "page-only", "dashed", "page-word"],
+)
+def test_other_filers_footers_give_each_page_its_printed_number(
+    footer_1: str, footer_2: str
+) -> None:
+    passages = FilingParser().parse(_synthetic_filing(footer_1, footer_2))
+    assert _pages(passages) == {"Item 1": (7, False), "Item 1A": (8, False)}
+    assert not any(footer_2 in passage.content for passage in passages)
+
+
+def test_a_page_break_on_a_div_separates_pages_too() -> None:
+    passages = FilingParser().parse(_synthetic_filing("7", "8", page_break=_DIV_BREAK))
+    assert _pages(passages) == {"Item 1": (7, False), "Item 1A": (8, False)}
+
+
+def test_a_filing_without_footers_gives_no_page_rather_than_a_guess() -> None:
+    passages = FilingParser().parse(_synthetic_filing("Contoso makes gadgets.", "Gadgets too."))
+    assert {passage.page for passage in passages} == {None}
+    assert not any(passage.page_approximate for passage in passages)
+
+
+def test_a_bare_number_that_is_not_last_on_its_page_is_content_not_a_footer() -> None:
+    html = _synthetic_filing("12", "End of Item 1A.").replace(
+        "<div>12</div>", "<div>12</div><div>units shipped</div>"
+    )
+    passages = FilingParser().parse(html)
+    assert {passage.page for passage in passages} == {None}
+    assert any("12" in passage.content for passage in passages if passage.item == "Item 1")
+
+
+def test_a_footer_that_does_not_count_upward_is_not_a_page_number() -> None:
+    passages = FilingParser().parse(_synthetic_filing("7", "3"))
+    # Page 3 after page 7 is not a page number: the page continues from 7, marked approximate.
+    assert _pages(passages) == {"Item 1": (7, False), "Item 1A": (8, True)}
