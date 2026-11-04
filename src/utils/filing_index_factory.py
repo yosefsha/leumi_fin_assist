@@ -26,7 +26,7 @@ INDEX_LOAD_ERRORS: tuple[type[Exception], ...] = (
 
 
 def open_filing_index(settings: Settings, force_rebuild: bool = False) -> FilingIndex:
-    """Load (building if needed) the hybrid index of `settings.filing_path` under `INDEX_DIR`.
+    """Load (building if needed) the hybrid index of `settings.filing.path` under `INDEX_DIR`.
 
     The embedding model is cached in `INDEX_DIR/models`, the Chroma store lives in
     `INDEX_DIR/chroma`. `force_rebuild` backs the CLI's `--rebuild-index`.
@@ -38,7 +38,7 @@ def open_filing_index(settings: Settings, force_rebuild: bool = False) -> Filing
         token_counter=embedder,
         store=ChromaIndexStore(settings.index_dir / STORE_SUBDIR),
     )
-    return loader.load(settings.filing_path, force_rebuild=force_rebuild)
+    return loader.load(settings.filing.path, force_rebuild=force_rebuild)
 
 
 def build_filing_index_loader(

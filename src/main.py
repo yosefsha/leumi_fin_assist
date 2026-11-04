@@ -18,9 +18,10 @@ from cli.menu import Menu, welcome_title
 from cli.suggested_questions import (
     NoSuggestedQuestionsError,
     SuggestedQuestions,
+    SuggestedQuestionsFileError,
     load_suggested_questions,
 )
-from utils.config import ConfigError, Settings
+from utils.config import ConfigError, FilingProfile, Settings
 from utils.filing_index_factory import INDEX_LOAD_ERRORS
 from utils.logging_config import configure_logging
 from utils.prompts import PromptNotFoundError
@@ -32,15 +33,27 @@ with contextlib.suppress(ImportError):  # line editing and history at the prompt
 def main(
     argv: Sequence[str] | None = None,
     load_settings: Callable[[], Settings] = Settings.load,
-    load_suggestions: Callable[[], SuggestedQuestions] = load_suggested_questions,
+    load_filing: Callable[[], FilingProfile] = FilingProfile.load,
+    load_suggestions: Callable[[FilingProfile | None], SuggestedQuestions] = (
+        load_suggested_questions
+    ),
 ) -> int:
-    """Run the CLI and return its exit status."""
+    """Run the CLI and return its exit status.
+
+    The Filing's profile needs no API key, so `--help` names the configured
+    company even without keys; when the profile itself is invalid, `--help` uses
+    generic wording and any other run stops at the settings error below.
+    """
     try:
-        suggestions = load_suggestions()
-    except (PromptNotFoundError, NoSuggestedQuestionsError) as error:
+        filing: FilingProfile | None = load_filing()
+    except ConfigError:
+        filing = None  # reported by load_settings, unless this is only --help
+    try:
+        suggestions = load_suggestions(filing)
+    except (PromptNotFoundError, NoSuggestedQuestionsError, SuggestedQuestionsFileError) as error:
         print(f"Error: cannot load the suggested questions: {error}", file=sys.stderr)
         return EXIT_CONFIG_ERROR
-    options = parse_cli_args(suggestions, argv)
+    options = parse_cli_args(suggestions, argv, filing.company if filing else None)
     try:
         settings = load_settings()
     except ConfigError as error:
@@ -55,7 +68,7 @@ def main(
     except KeyboardInterrupt:  # while the index loads, before the prompt is up
         print(file=sys.stderr)
         return EXIT_INTERRUPTED
-    menu = Menu(welcome_title(settings.filing_fiscal_year), suggestions)
+    menu = Menu(welcome_title(settings.filing.company, settings.filing.fiscal_year), suggestions)
     status = run_cli(options, agent, input, sys.stdout, sys.stderr, menu)
     if status == EXIT_INTERRUPTED:
         # A cancelled single question may leave tool calls in flight on worker threads, which

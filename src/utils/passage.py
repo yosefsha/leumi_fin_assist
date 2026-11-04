@@ -30,8 +30,10 @@ class Passage:
     `_[Table: <caption>]_` line, the table itself being its own Passage.
 
     `page` is the printed page number from the Filing's page footer. It is `None`
-    only for unnumbered front pages (the cover). `page_approximate` is `True` when
-    the number was inferred rather than read from a footer.
+    for unnumbered front pages (the cover), and for every page of a Filing whose
+    footers carry no page number: a citation then gives the Section Path alone.
+    `page_approximate` is `True` when the number was inferred rather than read
+    from a footer.
     """
 
     passage_id: str

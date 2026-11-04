@@ -1,4 +1,5 @@
-"""The Filing parser on Apple's FY2025 10-K (issue #3, PR #16), and its failure paths."""
+"""The Filing parser on Apple's FY2025 10-K (issue #3, PR #16), its failure paths, and
+other filers' page footers on a synthetic Filing (issue #35)."""
 
 import re
 from pathlib import Path
@@ -67,6 +68,15 @@ def test_page_numbers_never_decrease(passages: tuple[Passage, ...]) -> None:
     assert pages == sorted(pages)
 
 
+def test_every_apple_footer_is_confirmed_so_only_the_cover_lacks_a_page(
+    passages: tuple[Passage, ...],
+) -> None:
+    """Footer agreement (#35) must not drop any of Apple's `… Form 10-K | N` footers."""
+    unnumbered = {p.item for p in passages if p.page is None}
+    assert unnumbered == {"Front Matter"}
+    assert not any(p.page_approximate for p in passages)
+
+
 def test_notes_1_to_13_are_one_passage_each(passages: tuple[Passage, ...]) -> None:
     notes = [p for p in passages if p.kind is PassageKind.NOTE]
     numbers = [int(_NOTE_NUMBER.match(note.section_path[-1]).group(1)) for note in notes]
@@ -92,3 +102,91 @@ def test_html_without_items_raises(html: str) -> None:
 def test_missing_file_raises(tmp_path: Path) -> None:
     with pytest.raises(FilingParseError, match="Cannot read the Filing"):
         FilingParser().parse_file(tmp_path / "missing.htm")
+
+
+# --- Other filers' page footers (issue #35), on a synthetic Filing ----------------------------
+
+_HR_BREAK = '<hr style="page-break-after:always"/>'
+_DIV_BREAK = '<div style="page-break-before:always"></div>'
+_DOUBLE_BREAK = '<div style="page-break-after:always"></div><hr style="page-break-after:always"/>'
+_ITEMS = ("1", "1A", "2", "3")
+
+
+def _synthetic_filing(*page_endings: str, page_break: str = _HR_BREAK) -> str:
+    """A cover with a linked Table of Contents, then one page per Item, each closed by
+    the matching `page_endings` text (a footer, or the last line of the page's text)."""
+    items = _ITEMS[: len(page_endings)]
+    toc = "".join(f'<tr><td><a href="#i{i}">Item {i}.</a></td></tr>' for i in items)
+    pages = "".join(
+        f"""{page_break}
+<div id="i{item}"><span style="font-weight:bold">Item {item}. Heading {item}</span></div>
+<div>Contoso discusses Item {item} here.</div>
+<div>{ending}</div>"""
+        for item, ending in zip(items, page_endings, strict=True)
+    )
+    return f"""<html><body><table>{toc}</table>
+<div>Contoso Ltd. Annual Report on Form 10-K for the fiscal year 2026</div>
+{pages}
+</body></html>"""
+
+
+def _pages(passages: tuple[Passage, ...]) -> dict[str, tuple[int | None, bool]]:
+    return {p.item: (p.page, p.page_approximate) for p in passages if p.item != "Front Matter"}
+
+
+@pytest.mark.parametrize(
+    ("footer_1", "footer_2"),
+    [
+        ("Contoso Ltd. | 2026 Form 10-K | 7", "Contoso Ltd. | 2026 Form 10-K | 8"),
+        ("Contoso Ltd. 2026 Form 10-K 7", "Contoso Ltd. 2026 Form 10-K 8"),
+        ("2026 Annual Report on Form 10-K – Page 7", "2026 Annual Report on Form 10-K – Page 8"),
+        ("7", "8"),
+        ("- 7 -", "- 8 -"),
+        ("Page 7", "Page 8"),
+    ],
+    ids=["apple-style", "space", "dash-page", "page-only", "dashed", "page-word"],
+)
+def test_other_filers_footers_give_each_page_its_printed_number(
+    footer_1: str, footer_2: str
+) -> None:
+    passages = FilingParser().parse(_synthetic_filing(footer_1, footer_2))
+    assert _pages(passages) == {"Item 1": (7, False), "Item 1A": (8, False)}
+    assert not any(footer_2 in passage.content for passage in passages)
+
+
+@pytest.mark.parametrize("page_break", [_DIV_BREAK, _DOUBLE_BREAK], ids=["div", "div-and-hr"])
+def test_a_page_break_on_a_div_separates_pages_once(page_break: str) -> None:
+    passages = FilingParser().parse(_synthetic_filing("7", "8", "", page_break=page_break))
+    # Item 2's page has no footer: it continues from 8, so a phantom page would make it 10.
+    assert _pages(passages) == {"Item 1": (7, False), "Item 1A": (8, False), "Item 2": (9, True)}
+
+
+def test_a_filing_without_footers_gives_no_page_rather_than_a_guess() -> None:
+    passages = FilingParser().parse(_synthetic_filing("Gadgets.", "More gadgets."))
+    assert {passage.page for passage in passages} == {None}
+    assert not any(passage.page_approximate for passage in passages)
+
+
+def test_a_bare_number_that_is_not_last_on_its_page_is_content_not_a_footer() -> None:
+    html = _synthetic_filing("12", "End of Item 1A.").replace(
+        "<div>12</div>", "<div>12</div><div>units shipped</div>"
+    )
+    passages = FilingParser().parse(html)
+    assert {passage.page for passage in passages} == {None}
+    assert any("12" in passage.content for passage in passages if passage.item == "Item 1")
+
+
+def test_a_stray_figure_ending_a_page_is_kept_as_text_and_does_not_shift_later_pages() -> None:
+    passages = FilingParser().parse(_synthetic_filing("7", "250", "9", "10"))
+    assert _pages(passages) == {
+        "Item 1": (7, False),
+        "Item 1A": (8, True),
+        "Item 2": (9, False),
+        "Item 3": (10, False),
+    }
+    assert "250" in next(p.content for p in passages if p.item == "Item 1A")
+
+
+def test_footers_that_disagree_with_each_other_give_no_page() -> None:
+    passages = FilingParser().parse(_synthetic_filing("7", "3"))
+    assert {passage.page for passage in passages} == {None}

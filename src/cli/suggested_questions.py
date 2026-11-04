@@ -1,11 +1,24 @@
-"""The suggested questions the CLI offers by number, read from `prompts/suggested_questions.txt`."""
+"""The suggested questions the CLI offers by number, chosen for the configured Filing.
+
+The shipped Filing's list is `prompts/suggested_questions.txt`; `SUGGESTED_QUESTIONS_PATH`
+names another Filing's own list; without one, another company gets the generic list in
+`prompts/generic_suggested_questions.txt`, written for it.
+"""
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from utils.prompts import PROMPTS_DIR, load_prompt
+from utils.config import FilingProfile
+from utils.prompts import PROMPTS_DIR, load_prompt, render_prompt
 
 SUGGESTIONS_PROMPT = "suggested_questions"
+GENERIC_SUGGESTIONS_PROMPT = "generic_suggested_questions"
+UNKNOWN_COMPANY = "the company"
+"""What the generic list and `--help` call the filer when the settings cannot be loaded."""
+
+
+class SuggestedQuestionsFileError(Exception):
+    """The configured suggested-questions file cannot be read."""
 
 
 class NoSuggestedQuestionsError(ValueError):
@@ -61,10 +74,32 @@ def is_number_choice(text: str) -> bool:
     return stripped.isascii() and stripped.isdigit()
 
 
-def load_suggested_questions(prompts_dir: Path = PROMPTS_DIR) -> SuggestedQuestions:
-    """Read `<prompts_dir>/suggested_questions.txt`.
+def load_suggested_questions(
+    filing: FilingProfile | None, prompts_dir: Path = PROMPTS_DIR
+) -> SuggestedQuestions:
+    """The suggested questions for `filing` (`None` when the settings cannot be loaded).
 
-    Raises `PromptNotFoundError` when the file is missing and
-    `NoSuggestedQuestionsError` when it lists no question.
+    `filing.suggested_questions_path` when set; else `<prompts_dir>/suggested_questions.txt`
+    for the shipped Filing; else the generic list, written for `filing.company` (or
+    for "the company" when `filing` is `None`).
+
+    Raises `SuggestedQuestionsFileError` when the configured file cannot be read,
+    `PromptNotFoundError` when a file under `prompts_dir` is missing, and
+    `NoSuggestedQuestionsError` when the list has no question.
     """
-    return SuggestedQuestions.parse(load_prompt(SUGGESTIONS_PROMPT, prompts_dir))
+    if filing is not None and filing.suggested_questions_path is not None:
+        return SuggestedQuestions.parse(_read_questions_file(filing.suggested_questions_path))
+    if filing is not None and filing.is_shipped:
+        return SuggestedQuestions.parse(load_prompt(SUGGESTIONS_PROMPT, prompts_dir))
+    company = filing.company if filing is not None else UNKNOWN_COMPANY
+    generic = render_prompt(GENERIC_SUGGESTIONS_PROMPT, {"company": company}, prompts_dir)
+    return SuggestedQuestions.parse(generic)
+
+
+def _read_questions_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise SuggestedQuestionsFileError(
+            f"SUGGESTED_QUESTIONS_PATH {path} cannot be read: {error}"
+        ) from error

@@ -26,9 +26,10 @@ class Planner:
     complete. A failed API call propagates as `ChatModelError`.
     """
 
-    def __init__(self, model: ChatModel, fiscal_year: int) -> None:
+    def __init__(self, model: ChatModel, fiscal_year: int, company: str) -> None:
         self._model = model
         self._fiscal_year = fiscal_year
+        self._company = company
 
     def plan(self, question: str, tools: Sequence[ToolParam], today: date) -> Plan:
         """Return the Plan for `question` over `tools`."""
@@ -37,7 +38,12 @@ class Planner:
         )
         system = render_prompt(
             PLANNER_PROMPT,
-            {"fiscal_year": str(self._fiscal_year), "today": today.isoformat(), "tools": tool_list},
+            {
+                "company": self._company,
+                "fiscal_year": str(self._fiscal_year),
+                "today": today.isoformat(),
+                "tools": tool_list,
+            },
         )
         schema = Plan.json_schema([tool["name"] for tool in tools])
         try:

@@ -30,7 +30,7 @@ _FAKE_KEY = "tvly-offline-test-key-0123456789"
 
 def test_results_are_returned_as_sources() -> None:
     client = ScriptedWebSearchClient([[_RESULT]])
-    output = WebSearchTool(client).run(_QUERY)
+    output = WebSearchTool(client, "Apple Inc.").run(_QUERY)
     assert not output.is_error
     assert json.loads(output.content) == {"query": _QUERY["query"], "results_found": 1}
     assert output.sources == (_RESULT,)
@@ -38,14 +38,14 @@ def test_results_are_returned_as_sources() -> None:
 
 def test_a_timeout_is_retried_exactly_once() -> None:
     client = ScriptedWebSearchClient([WebSearchTimeoutError("slow"), [_RESULT]])
-    output = WebSearchTool(client).run(_QUERY)
+    output = WebSearchTool(client, "Apple Inc.").run(_QUERY)
     assert not output.is_error
     assert client.queries == [_QUERY["query"]] * 2
 
 
 def test_a_second_timeout_is_an_error_result() -> None:
     client = ScriptedWebSearchClient([WebSearchTimeoutError("slow"), WebSearchTimeoutError("slow")])
-    output = WebSearchTool(client).run(_QUERY)
+    output = WebSearchTool(client, "Apple Inc.").run(_QUERY)
     assert output.is_error
     assert output.content == "Web search failed: slow"
     assert len(client.queries) == 2
@@ -53,14 +53,14 @@ def test_a_second_timeout_is_an_error_result() -> None:
 
 def test_a_provider_error_is_not_retried() -> None:
     client = ScriptedWebSearchClient([WebSearchError("Tavily returned HTTP 500.")])
-    output = WebSearchTool(client).run(_QUERY)
+    output = WebSearchTool(client, "Apple Inc.").run(_QUERY)
     assert output.is_error
     assert "HTTP 500" in output.content
     assert len(client.queries) == 1
 
 
 def test_no_results_is_an_error_result() -> None:
-    output = WebSearchTool(ScriptedWebSearchClient([[]])).run(_QUERY)
+    output = WebSearchTool(ScriptedWebSearchClient([[]]), "Apple Inc.").run(_QUERY)
     assert output.is_error
     assert output.content.startswith("No web results found")
 
@@ -72,7 +72,7 @@ def test_no_results_is_an_error_result() -> None:
 )
 def test_invalid_arguments_are_an_error_result_without_a_search(args: dict[str, Any]) -> None:
     client = ScriptedWebSearchClient([])
-    output = WebSearchTool(client).run(args)
+    output = WebSearchTool(client, "Apple Inc.").run(args)
     assert output.is_error
     assert output.content.startswith("Invalid web_search arguments:")
     assert client.queries == []
@@ -108,7 +108,7 @@ def test_the_api_key_never_reaches_logs_or_results(
         return post_outcome
 
     monkeypatch.setattr(requests.Session, "post", post)
-    tool = WebSearchTool(TavilyWebSearchClient(_FAKE_KEY))
+    tool = WebSearchTool(TavilyWebSearchClient(_FAKE_KEY), "Apple Inc.")
 
     with caplog.at_level(logging.DEBUG):
         output = tool.run(_QUERY)

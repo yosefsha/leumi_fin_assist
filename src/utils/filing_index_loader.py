@@ -16,8 +16,9 @@ from utils.token_counter import TokenCounter
 
 logger = logging.getLogger(__name__)
 
-INDEX_FORMAT_VERSION = "1"
-"""Bump when chunking or entry layout changes, so stored indexes built the old way rebuild."""
+INDEX_FORMAT_VERSION = "2"
+"""Bump when parsing, chunking or entry layout changes, so stored indexes built the old way
+rebuild. 2: other filers' page footers and page breaks (#35)."""
 
 
 class IndexEntryTooLongError(Exception):

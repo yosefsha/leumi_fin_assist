@@ -8,9 +8,9 @@ MENU_INTRO = "Try one of these, or type your own question:"
 MENU_HINT = "Type a number, a question, 'help' to show this list again, or 'exit' to quit."
 
 
-def welcome_title(fiscal_year: int) -> str:
+def welcome_title(company: str, fiscal_year: int) -> str:
     """The first line of the interactive mode, naming the Filing it answers from."""
-    return f"Financial Research Assistant — Apple 10-K (FY{fiscal_year}) + web search"
+    return f"Financial Research Assistant — {company} 10-K (FY{fiscal_year}) + web search"
 
 
 @dataclass(frozen=True)
