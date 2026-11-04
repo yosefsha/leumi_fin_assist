@@ -1,5 +1,12 @@
 # Financial Research Assistant
 
+# demo video
+
+
+https://github.com/user-attachments/assets/9bcc570d-a556-434d-abdf-a8881f2ce592
+
+
+
 A command-line AI agent that answers questions about Apple Inc. from Apple's FY2025 Form 10-K
 (the **Filing**) and live web search. It plans its approach, calls tools (hybrid retrieval over
 the Filing, Tavily web search, an exact calculator), checks its evidence before answering, and
