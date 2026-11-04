@@ -67,7 +67,7 @@ Sources:
 
 ## Setup
 
-Requirements: **Python 3.12** (the code uses 3.12 syntax), an
+Requirements: **Python 3.14** (3.12 or newer works; CI tests 3.14), an
 [Anthropic API key](https://console.anthropic.com/) and a [Tavily API key](https://tavily.com/)
 (the free tier gives 1,000 searches a month). About 1 GB of disk for the dependencies, the
 embedding model and the index.
@@ -79,29 +79,25 @@ embedding model and the index.
    cd leumi_fin_assist
    ```
 
-2. **Create a Python 3.12 virtual environment, install the dependencies and the `finassist`
-   command.**
+2. **Create a virtual environment and install the project with pip.**
 
    ```bash
-   python3.12 -m venv .venv
+   python3 -m venv .venv
    source .venv/bin/activate          # Windows: .venv\Scripts\activate
-   pip install -r requirements.txt
-   pip install -e .                   # installs the finassist command into the venv
+   pip install -e .                   # dependencies + the finassist command
    ```
 
-   If `python3.12` is not found, [uv](https://docs.astral.sh/uv/) fetches a 3.12 interpreter for you:
+   `python3 --version` should print 3.12 or newer. `pip install -r requirements.txt` (the
+   form in `docs/TASKS.md`) installs the same dependencies but not the `finassist` command.
 
-   ```bash
-   uv venv --python 3.12 .venv
-   source .venv/bin/activate
-   uv pip install -r requirements.txt
-   uv pip install -e .
-   ```
+   **Troubleshooting `externally-managed-environment`:** `pip` is not the venv's own, so it
+   tried to install into the system Python. This happens when the venv was created with
+   `uv venv`, which adds no `pip`. Either install with `uv pip install -e .`, or recreate the
+   venv with `python3 -m venv .venv` as above.
 
    Install it **editable** (`-e`): the command runs the code in `src/` and reads `prompts/`,
    `data/` and `.env` from this checkout, so it works from any directory while the venv is
-   active. `pip install -e .` alone also installs the dependencies (it reads
-   `requirements.txt`). Without the install, `python src/main.py` takes the same arguments.
+   active. Without the install, `python src/main.py` takes the same arguments.
 
 3. **The Filing is already in the repository**: `data/apple_10k_2025.htm`, Apple's 10-K for the
    fiscal year ended September 27, 2025 (accession `0000320193-25-000079`, filed 2025-10-31).
@@ -834,7 +830,7 @@ From the recorded runs in [`docs/query-run-results.md`](docs/query-run-results.m
 ├── README.md                 this guide
 ├── CLAUDE.md                 rules for AI coding agents (branches, worktrees, PRs)
 ├── CONTEXT.md                domain glossary
-├── requirements.txt          minimum-pinned dependencies (Python 3.12)
+├── requirements.txt          minimum-pinned dependencies (Python 3.12+; CI runs 3.14)
 ├── pyproject.toml            the finassist command (packaging) + ruff + pytest configuration
 ├── .env.example              every setting, documented
 ├── data/apple_10k_2025.htm   the Filing (FY2025, accession 0000320193-25-000079)

@@ -287,9 +287,7 @@ def test_free_text_at_the_prompt_is_asked_as_typed_without_an_echo() -> None:
     assert QUESTION_LABEL not in out
 
 
-@pytest.mark.parametrize(
-    "number", ["0", "3", "42", pytest.param("9" * 5000, id="5000-digits")]
-)
+@pytest.mark.parametrize("number", ["0", "3", "42", pytest.param("9" * 5000, id="5000-digits")])
 def test_an_out_of_range_number_gets_one_line_and_the_menu_is_not_reprinted(number: str) -> None:
     agent = _StubAgent(error=AssertionError("not asked"))
     status, out, _ = _run(CliOptions(), agent, _lines(number))
